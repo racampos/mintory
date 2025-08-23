@@ -229,20 +229,96 @@ apps/frontend/
 
 ---
 
-## Phase 5 — Replace Stubs with Real Pinning & Art
+## Phase 5 — Replace ALL Agent Stubs with Real Implementations
 
-**Objective:** Upgrade the demo to real image generation + IPFS pinning.
+**Objective:** Upgrade all agents from stubs to real LLM/API/IPFS integration.
 
-### Tasks
+### Phase 5.1: MCP Client Infrastructure ✅ **COMPLETED**
 
-- Set `ENABLE_STUB_ART=0` → **Artist Agent** calls your image generator API (or local model).
-- Generate 4–6 images + thumbnails; call MCP `pin_cid` to pin; enforce size limits (<2MB full, <200KB thumb).
-- **Metadata**: construct per `docs/context/metadata_schema.md` and `pin_metadata` before mint.
-- **Vote**: maintain allowlist for reliability; duration 60–120s; implement timeout fallback (pick index 0) with console note.
+_Foundation for all agent integrations_
 
-### Acceptance Criteria
+**✅ Implemented:**
 
-- Token’s `tokenURI` resolves to JSON with `image` (ipfs\://CID), and `properties` include `summary_md`, `sources[]`, `prompt_seed{}`.
+- **MCP Client** (`apps/backend/services/mcp_client.py`): Full HTTP client with all endpoints, error handling, retries, singleton pattern
+- **LLM Client** (`apps/backend/services/llm_client.py`): OpenAI integration with chat completions, structured outputs, specialized Lore Agent methods
+- **Image Client** (`apps/backend/services/image_client.py`): Multi-provider support (OpenAI DALL-E, Stability AI, Mock), validation, file handling
+- **Test Suite** (`apps/backend/test_services.py`): Comprehensive unit & integration tests with 25+ test methods
+- **Configuration** (`apps/backend/env.template`): Complete environment variable documentation for all services
+- **Dependencies** (`apps/backend/requirements.txt`): Added `openai>=1.0.0`, `pillow>=10.0.0`
+
+**✅ Integration Verified:**
+
+- MCP client successfully calls all endpoints (chain_info, gasback_info, medal_of, start_vote)
+- All service imports working with singleton patterns
+- Mock image generation tested and working
+- Error handling robust across all external API calls
+
+### Phase 5.2: Real Lore Agent
+
+_Replace hardcoded research with LLM calls_
+
+- Integrate OpenAI/Claude API for historical research based on `date_label`
+- Generate real `summary_md` (≤200 words), `bullet_facts`, `sources` from research
+- Create historically-accurate `prompt_seed` (style, palette, motifs)
+- **Test**: Enter historical date → get real research output
+- **Files**: `apps/backend/agents/lore.py`
+
+### Phase 5.3: Artist Agent - Image Generation
+
+_Generate real images without IPFS first_
+
+- Replace placeholder CIDs with DALL-E/Midjourney/Stability API calls
+- Use `LorePack.prompt_seed` for image generation prompts
+- Generate 4-6 images and store locally (temp files)
+- **Test**: Real images generated and stored locally
+- **Files**: `apps/backend/agents/artist.py`
+
+### Phase 5.4: Artist Agent - IPFS Integration
+
+_Pin real images to IPFS_
+
+- Add MCP `pin_cid` calls for generated images
+- Generate proper thumbnails with PIL/Pillow
+- Implement size validation (<2MB images, <200KB thumbs)
+- **Test**: Images pinned to IPFS, CIDs resolve correctly
+- **Files**: `apps/backend/agents/artist.py`
+
+### Phase 5.5: Real Vote Agent
+
+_Replace vote simulation with MCP integration_
+
+- Integrate MCP `start_vote` and `vote_status` polling
+- Add timeout fallback logic (pick index 0, record `fallback: true`)
+- Real blockchain vote ID handling
+- **Test**: Can start real vote, poll status, handle timeout
+- **Files**: `apps/backend/agents/vote.py`
+
+### Phase 5.6: Real Mint Agent
+
+_Complete metadata + real minting_
+
+- Build complete metadata per `docs/context/metadata_schema.md`
+- Real MCP `pin_metadata` and `mint_final` calls
+- Proper `tx_hash` and `token_id` handling
+- **Test**: Real NFT minted with complete metadata
+- **Files**: `apps/backend/agents/mint.py`
+
+### Phase 5.7: Validation & Polish
+
+_Enforce all acceptance criteria_
+
+- Size limits, word counts, CID validation per `agents_spec.md`
+- Error handling for API failures
+- Feature flag cleanup (`ENABLE_STUB_ART=0`, `ENABLE_STUB_PIN=0`)
+- **Test**: End-to-end with all validation rules
+
+### Overall Acceptance Criteria
+
+- **Lore**: Real research relevant to `date_label` input
+- **Artist**: Real images generated from research-derived `prompt_seed`
+- **Vote**: Blockchain integration with timeout fallback
+- **Mint**: Complete metadata schema compliance with real data
+- **Integration**: Token's `tokenURI` resolves to JSON with real `image` (ipfs://CID) and complete `properties`
 
 ---
 
