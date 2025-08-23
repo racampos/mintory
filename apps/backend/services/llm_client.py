@@ -236,8 +236,18 @@ Respond only with the JSON object, no additional text or explanation.
             
             content = content.strip()
             
+            # Try to extract JSON object from potentially verbose response
+            # Look for the first { and last } to extract just the JSON part
+            start_idx = content.find('{')
+            end_idx = content.rfind('}')
+            
+            if start_idx == -1 or end_idx == -1:
+                raise json.JSONDecodeError("No JSON object found in response", content, 0)
+            
+            json_content = content[start_idx:end_idx + 1]
+            
             # Parse JSON
-            parsed_json = json.loads(content)
+            parsed_json = json.loads(json_content)
             
             # Validate with Pydantic model
             structured_data = response_model.model_validate(parsed_json)
@@ -264,15 +274,33 @@ Respond only with the JSON object, no additional text or explanation.
             Tuple of (LorePack, raw_response)
         """
         system_prompt = """
-You are a historical research agent for an NFT creation platform. Your task is to research a given date and create engaging historical context that will inspire digital art creation.
+You are a historical research agent for an NFT creation platform. Research the given historical date and provide detailed historical context.
 
-Guidelines:
-- summary_md: Write 150-200 words in markdown format about the historical significance of the date
-- bullet_facts: Provide 5-10 interesting bullet points about events, people, or developments on this date
-- sources: Include 5+ real HTTP/HTTPS URLs that relate to the historical events (these will be displayed as links)
-- prompt_seed: Create artistic direction for image generation including style, palette (colors), motifs (visual elements), and negative prompts
+You MUST respond with a valid JSON object that contains these exact fields:
 
-Focus on technological, cultural, or socially significant events that would translate well to digital art. Make the content inspiring and suitable for NFT creation.
+{
+  "summary_md": "A 150-200 word markdown summary of the historical significance",
+  "bullet_facts": ["5-10 interesting bullet points about events/people/developments"],
+  "sources": ["5+ real HTTP/HTTPS URLs related to the historical events"],
+  "prompt_seed": {
+    "style": "artistic style description for image generation",
+    "palette": "color palette description",
+    "motifs": ["visual elements and themes"],
+    "negative": "things to avoid in the art"
+  }
+}
+
+Requirements:
+- summary_md: Write in markdown format, exactly 150-200 words about the historical significance
+- bullet_facts: Provide 5-10 concise, interesting facts as an array of strings
+- sources: Include 5+ real, working HTTP/HTTPS URLs (Wikipedia, .edu, .gov, major news sites)
+- prompt_seed.style: Describe the artistic style that would capture this historical moment
+- prompt_seed.palette: Describe colors that represent this period/event
+- prompt_seed.motifs: List visual elements that symbolize this historical moment
+- prompt_seed.negative: List things to avoid in the artistic representation
+
+Focus on technological, cultural, or socially significant events. Make it inspiring for NFT art creation.
+Respond ONLY with the JSON object, no additional text before or after.
 """
         
         messages = [

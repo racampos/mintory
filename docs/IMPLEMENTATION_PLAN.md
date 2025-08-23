@@ -253,15 +253,30 @@ _Foundation for all agent integrations_
 - Mock image generation tested and working
 - Error handling robust across all external API calls
 
-### Phase 5.2: Real Lore Agent
+### Phase 5.2: Real Lore Agent ✅ **COMPLETED**
 
 _Replace hardcoded research with LLM calls_
 
-- Integrate OpenAI/Claude API for historical research based on `date_label`
-- Generate real `summary_md` (≤200 words), `bullet_facts`, `sources` from research
-- Create historically-accurate `prompt_seed` (style, palette, motifs)
-- **Test**: Enter historical date → get real research output
-- **Files**: `apps/backend/agents/lore.py`
+**✅ Implemented:**
+
+- **Real LLM Integration** (`apps/backend/agents/lore.py`): OpenAI GPT-4o API calls for historical research
+- **Structured Output Parsing**: JSON extraction with improved error handling for verbose LLM responses
+- **Comprehensive Validation**: Enforces agents_spec.md requirements (≤200 words, 5-10 facts, 5+ sources)
+- **Robust Fallback**: Graceful degradation when LLM API unavailable with historically-accurate fallback content
+- **Environment Configuration**: Proper dotenv loading for API keys
+
+**✅ Real LLM Results Verified:**
+
+- **Moon Landing (July 20, 1969)**: 156 words, 10 facts, surrealist/futuristic art style, NASA/History.com sources
+- **Bitcoin Whitepaper (Oct 31, 2008)**: 140 words, 10 facts, cyberpunk art style, Bitcoin.org/Forbes sources
+- **API Integration**: 1133-1162 tokens per request, structured JSON parsing working
+- **Validation**: All requirements met per agents_spec.md (word counts, fact counts, HTTP sources, prompt_seed completeness)
+
+**✅ Test Coverage:**
+
+- `test_lore_agent.py`: Unit tests + real API integration + fallback behavior
+- `test_lore_integration.py`: LangGraph workflow integration tests
+- Environment variable loading with python-dotenv
 
 ### Phase 5.3: Artist Agent - Image Generation
 

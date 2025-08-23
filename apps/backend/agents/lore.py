@@ -1,75 +1,168 @@
 """
-Lore Agent - Research and context generation
+Lore Agent - Research and context generation using real LLM integration
 """
 import uuid
+import logging
 from typing import Dict, Any
 from state import RunState, LorePack
+from services import get_llm_client
+
+logger = logging.getLogger(__name__)
 
 
-def lore_agent(state: RunState) -> Dict[str, Any]:
+def validate_lore_pack(lore_pack_dict: Dict[str, Any], date_label: str) -> None:
     """
-    Lore Agent: Generate historical context and research summary
+    Validate LorePack meets agents_spec.md requirements
+    
+    Args:
+        lore_pack_dict: Dictionary representation of LorePack
+        date_label: Original date for error context
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    # Check summary_md word count (≤200 words)
+    summary = lore_pack_dict.get("summary_md", "")
+    if not summary:
+        raise ValueError(f"summary_md is empty for date: {date_label}")
+    
+    word_count = len(summary.split())
+    if word_count > 200:
+        raise ValueError(f"summary_md has {word_count} words, must be ≤200 for date: {date_label}")
+    
+    # Check bullet_facts count (5-10)
+    bullet_facts = lore_pack_dict.get("bullet_facts", [])
+    if len(bullet_facts) < 5:
+        raise ValueError(f"bullet_facts has {len(bullet_facts)} items, must be ≥5 for date: {date_label}")
+    if len(bullet_facts) > 10:
+        raise ValueError(f"bullet_facts has {len(bullet_facts)} items, must be ≤10 for date: {date_label}")
+    
+    # Check sources count (≥5)
+    sources = lore_pack_dict.get("sources", [])
+    if len(sources) < 5:
+        raise ValueError(f"sources has {len(sources)} items, must be ≥5 for date: {date_label}")
+    
+    # Check all sources are HTTP(S) URLs
+    for i, source in enumerate(sources):
+        if not source.startswith(("http://", "https://")):
+            raise ValueError(f"sources[{i}] '{source}' must be HTTP/HTTPS URL for date: {date_label}")
+    
+    # Check prompt_seed has required fields
+    prompt_seed = lore_pack_dict.get("prompt_seed", {})
+    if not prompt_seed.get("style"):
+        raise ValueError(f"prompt_seed.style is empty for date: {date_label}")
+    if not prompt_seed.get("palette"):
+        raise ValueError(f"prompt_seed.palette is empty for date: {date_label}")
+
+
+async def lore_agent(state: RunState) -> Dict[str, Any]:
+    """
+    Lore Agent: Generate historical context and research summary using real LLM
     
     Input: date_label
     Output: LorePack with summary, facts, sources, prompt_seed
+    
+    Uses OpenAI/LLM to research the historical date and generate:
+    - summary_md: ≤200 words of historical context
+    - bullet_facts: 5-10 key historical points  
+    - sources: ≥5 HTTP/HTTPS URLs for reference
+    - prompt_seed: Art generation guidance (style, palette, motifs, negative)
     """
     date_label = state["date_label"]
     
-    # For hackathon demo - create a reasonable lore pack
-    # In production, this would call LLM APIs for research
+    # Create progress message for LLM research
+    research_message = {
+        "agent": "Lore",
+        "level": "info", 
+        "message": f"Researching historical significance of {date_label}...",
+        "ts": str(uuid.uuid4())
+    }
     
-    lore_pack = {
-        "summary_md": f"""
+    try:
+        # Get LLM client and generate real historical research
+        llm_client = get_llm_client()
+        logger.info(f"Starting LLM research for date: {date_label}")
+        
+        # Use the specialized generate_lore_pack method
+        lore_pack_model, llm_response = await llm_client.generate_lore_pack(date_label)
+        
+        # Convert Pydantic model to dict for state compatibility
+        lore_pack_dict = lore_pack_model.model_dump()
+        
+        # Validate the generated content meets spec requirements
+        validate_lore_pack(lore_pack_dict, date_label)
+        
+        logger.info(f"LLM research completed for {date_label}: {llm_response.usage['total_tokens']} tokens used")
+        
+        # Create success message with source links
+        success_message = {
+            "agent": "Lore", 
+            "level": "success",
+            "message": f"Generated historical research for {date_label} ({len(lore_pack_dict['summary_md'].split())} words, {len(lore_pack_dict['bullet_facts'])} facts, {len(lore_pack_dict['sources'])} sources)",
+            "ts": str(uuid.uuid4()),
+            "links": [
+                {"label": f"Source {i+1}", "href": url} 
+                for i, url in enumerate(lore_pack_dict["sources"][:3])
+            ]
+        }
+        
+        return {
+            "lore": lore_pack_dict,
+            "checkpoint": "lore_approval",
+            "messages": [research_message, success_message]
+        }
+        
+    except Exception as e:
+        logger.error(f"Lore agent failed for date {date_label}: {e}")
+        
+        # Create fallback lore pack for demo reliability
+        fallback_lore_pack = {
+            "summary_md": f"""
 # {date_label}
 
-This historical moment represents a pivotal point in technological and social history. 
-The date marks significant developments that shaped our understanding of decentralized systems, 
-digital innovation, and community-driven progress. Key stakeholders and technologies converged 
-to create lasting impact on how we interact with digital assets and blockchain technology.
+This historical date represents an important moment in time. While our research systems encountered an issue, {date_label} likely marks significant developments in technology, culture, or society. Historical events on this date may have influenced digital innovation, community development, or technological progress.
 
-The historical significance extends beyond immediate technical achievements to encompass 
-broader implications for digital sovereignty, community governance, and decentralized finance.
-        """.strip(),
-        
-        "bullet_facts": [
-            f"Historical date: {date_label}",
-            "Significant technological milestone achieved",
-            "Community-driven development model established",
-            "Open-source principles emphasized",
-            "Decentralized governance concepts introduced",
-            "Impact on digital asset ecosystem",
-            "Foundation for future innovations",
-            "Global accessibility improvements"
-        ],
-        
-        "sources": [
-            "https://ethereum.org/en/history/",
-            "https://github.com/ethereum/go-ethereum",
-            "https://blog.ethereum.org/",
-            "https://etherscan.io/",
-            "https://docs.ethereum.org/",
-            "https://ethereum.github.io/yellowpaper/paper.pdf"
-        ],
-        
-        "prompt_seed": {
-            "style": "digital art, futuristic, blockchain aesthetic",
-            "palette": "blue, purple, gold, electric colors",
-            "motifs": ["geometric patterns", "network nodes", "flowing data", "crystalline structures"],
-            "negative": "dark, dystopian, chaotic"
+The significance of this date extends to broader themes of human progress, technological advancement, and social change that continue to shape our modern world.
+            """.strip(),
+            
+            "bullet_facts": [
+                f"Historical date: {date_label}",
+                "Significant moment in historical timeline",
+                "Potential technological or cultural milestone",
+                "Impact on societal development",
+                "Foundation for future innovations",
+                "Influence on modern digital culture"
+            ],
+            
+            "sources": [
+                "https://en.wikipedia.org/wiki/Timeline_of_computing",
+                "https://www.britannica.com/technology/history-of-technology", 
+                "https://www.computerhistory.org/timeline/",
+                "https://timeline.web.cern.ch/",
+                "https://www.historyoftechnology.org/"
+            ],
+            
+            "prompt_seed": {
+                "style": "historical, documentary, classical art style",
+                "palette": "warm browns, gold, sepia tones, classic colors",
+                "motifs": ["vintage elements", "historical artifacts", "traditional patterns", "timeless designs"],
+                "negative": "modern, futuristic, digital"
+            }
         }
-    }
-    
-    # Add agent message for streaming
-    message = {
-        "agent": "Lore",
-        "level": "info",
-        "message": f"Generated historical context for {date_label}",
-        "ts": str(uuid.uuid4()),
-        "links": [{"label": f"Source {i+1}", "href": url} for i, url in enumerate(lore_pack["sources"][:3])]
-    }
-    
-    return {
-        "lore": lore_pack,
-        "checkpoint": "lore_approval",
-        "messages": [message]
-    }
+        
+        # Validate fallback meets requirements
+        validate_lore_pack(fallback_lore_pack, date_label)
+        
+        error_message = {
+            "agent": "Lore",
+            "level": "warning",
+            "message": f"Research error for {date_label}, using fallback content: {str(e)[:100]}...",
+            "ts": str(uuid.uuid4()),
+            "links": [{"label": f"Source {i+1}", "href": url} for i, url in enumerate(fallback_lore_pack["sources"][:3])]
+        }
+        
+        return {
+            "lore": fallback_lore_pack, 
+            "checkpoint": "lore_approval",
+            "messages": [research_message, error_message]
+        }
