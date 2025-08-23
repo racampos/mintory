@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Send, Bot, User, Coins, Trophy } from 'lucide-react';
-import { mcpClient } from '@/lib/mcp-client';
 import type { RunState } from '@/lib/types';
 
 interface CuratorChatProps {
@@ -21,32 +20,6 @@ export function CuratorChat({ onRunStart }: CuratorChatProps) {
 
   const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
     api: '/api/chat',
-    onToolCall: async ({ toolCall }) => {
-      // Handle MCP tool calls
-      const { toolName, args } = toolCall;
-
-      try {
-        switch (toolName) {
-          case 'get_chain_info':
-            return await mcpClient.getChainInfo();
-          
-          case 'get_gasback_info':
-            return await mcpClient.getGasbackInfo(args.contract);
-          
-          case 'get_user_medals':
-            return await mcpClient.getMedalsOf(args.address);
-          
-          case 'get_vote_status':
-            return await mcpClient.getVoteStatus(args.vote_id);
-          
-          default:
-            throw new Error(`Unknown tool: ${toolName}`);
-        }
-      } catch (error) {
-        console.error(`Tool call ${toolName} failed:`, error);
-        throw error;
-      }
-    },
   });
 
   const startNewRun = async () => {
@@ -54,7 +27,7 @@ export function CuratorChat({ onRunStart }: CuratorChatProps) {
 
     setIsStartingRun(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/runs`, {
+      const response = await fetch('/api/orchestrator/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date_label: dateInput }),
@@ -141,19 +114,16 @@ export function CuratorChat({ onRunStart }: CuratorChatProps) {
                 </div>
                 <div className="text-sm">{message.content}</div>
                 
-                {/* Tool Call Results */}
-                {message.toolInvocations?.map((toolInvocation) => (
-                  <div key={toolInvocation.toolCallId} className="mt-2 p-2 rounded bg-background/50">
-                    <Badge variant="secondary" className="mb-1">
-                      {toolInvocation.toolName}
-                    </Badge>
-                    {toolInvocation.result && (
-                      <pre className="text-xs overflow-auto">
-                        {JSON.stringify(toolInvocation.result, null, 2)}
-                      </pre>
-                    )}
+                {/* Tool Call Indicators (optional - shows which tools were used) */}
+                {message.toolInvocations && message.toolInvocations.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {message.toolInvocations.map((toolInvocation) => (
+                      <Badge key={toolInvocation.toolCallId} variant="outline" className="text-xs">
+                        {toolInvocation.toolName}
+                      </Badge>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </div>
           ))}

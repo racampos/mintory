@@ -31,7 +31,7 @@ export default function Home() {
     if (!runState) return;
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/runs/${runState.run_id}/resume`, {
+      const response = await fetch(`/api/orchestrator/runs/${runState.run_id}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(action),

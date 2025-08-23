@@ -60,9 +60,15 @@ src/
 ## Environment Variables
 
 ```env
+# Server-side (API routes)
 BACKEND_URL=http://localhost:8000
 MCP_URL=http://localhost:3001
-CHAIN_ID=360
+
+# Client-side (browser)
+NEXT_PUBLIC_CHAIN_ID=360
+
+# AI Services
+OPENAI_API_KEY=your_key_here
 ```
 
 ## Getting Started
@@ -103,9 +109,38 @@ The app will be available at http://localhost:3002
 
 ### 4. MCP Tool Calls
 
-- Chain info, gasback, and medal data fetched via HTTP
+- Chain info, gasback, and medal data fetched via HTTP proxy
+- Frontend calls `/api/mcp/*` routes which proxy to MCP server
+- Avoids CORS issues during development
 - Read-only tools integrated into AI chat
 - Write tools return PreparedTx for wallet signing
+
+## CORS Solution During Development
+
+The frontend uses Next.js API routes as a proxy to both services to avoid CORS issues:
+
+```
+Browser → /api/mcp/chain_info → MCP Server (http://localhost:3001)
+Browser → /api/orchestrator/runs → Backend (http://localhost:8000)
+```
+
+**Proxy Routes:**
+
+- `GET /api/mcp/chain_info` → `GET /mcp/chain_info`
+- `GET /api/mcp/gasback_info?contract=X` → `GET /mcp/gasback_info?contract=X`
+- `GET /api/mcp/medal_of?address=X` → `GET /mcp/medal_of?address=X`
+- `GET /api/mcp/vote_status?vote_id=X` → `GET /mcp/vote_status?vote_id=X`
+- `POST /api/mcp/pin_metadata` → `POST /mcp/pin_metadata`
+- `POST /api/mcp/start_vote` → `POST /mcp/start_vote`
+- `POST /api/mcp/tally_vote` → `POST /mcp/tally_vote`
+- `POST /api/mcp/mint_final` → `POST /mcp/mint_final`
+- `POST /api/mcp/issue_medal` → `POST /mcp/issue_medal`
+
+**Orchestrator Routes:**
+
+- `POST /api/orchestrator/runs` → `POST /runs`
+- `POST /api/orchestrator/runs/{id}/resume` → `POST /runs/{id}/resume`
+- `GET /api/orchestrator/runs/{id}/stream` → `GET /runs/{id}/stream` (SSE Proxy)
 
 ## Development Notes
 
@@ -115,6 +150,7 @@ The app will be available at http://localhost:3002
 - EventSource with exponential backoff reconnection
 - Responsive design optimized for desktop
 - Error handling with toast notifications
+- **CORS handling**: All backend calls proxied through Next.js API routes to avoid cross-origin issues during development
 
 ## Production Considerations
 

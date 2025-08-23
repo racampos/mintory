@@ -71,7 +71,7 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
 
     const connectToStream = () => {
       const es = new EventSource(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/runs/${runState.run_id}/stream`
+        `/api/orchestrator/runs/${runState.run_id}/stream`
       );
 
       es.onmessage = (event) => {

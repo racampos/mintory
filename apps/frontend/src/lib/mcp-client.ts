@@ -1,18 +1,17 @@
 import type { ChainInfo, GasbackInfo, MedalInfo, PreparedTx } from './types';
 
-// Default MCP URL
-const DEFAULT_MCP_URL = 'http://localhost:3001';
-
 export class MCPClient {
   private baseUrl: string;
 
-  constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || DEFAULT_MCP_URL;
+  constructor() {
+    // Use Next.js API routes as proxy to avoid CORS issues
+    this.baseUrl = '/api/mcp';
   }
 
   // Read Tools
   async getChainInfo(): Promise<ChainInfo> {
-    const response = await fetch(`${this.baseUrl}/mcp/chain_info`);
+    console.log('[MCP Client] Making request to:', `${this.baseUrl}/chain_info`);
+    const response = await fetch(`${this.baseUrl}/chain_info`);
     if (!response.ok) {
       throw new Error(`Failed to get chain info: ${response.statusText}`);
     }
@@ -20,7 +19,7 @@ export class MCPClient {
   }
 
   async getGasbackInfo(contract: string): Promise<GasbackInfo> {
-    const url = new URL(`${this.baseUrl}/mcp/gasback_info`);
+    const url = new URL(`${this.baseUrl}/gasback_info`, window.location.origin);
     url.searchParams.set('contract', contract);
     
     const response = await fetch(url.toString());
@@ -31,7 +30,7 @@ export class MCPClient {
   }
 
   async getMedalsOf(address: string): Promise<MedalInfo> {
-    const url = new URL(`${this.baseUrl}/mcp/medal_of`);
+    const url = new URL(`${this.baseUrl}/medal_of`, window.location.origin);
     url.searchParams.set('address', address);
     
     const response = await fetch(url.toString());
@@ -46,7 +45,7 @@ export class MCPClient {
     tallies: number[];
     endsAt: string;
   }> {
-    const url = new URL(`${this.baseUrl}/mcp/vote_status`);
+    const url = new URL(`${this.baseUrl}/vote_status`, window.location.origin);
     url.searchParams.set('vote_id', voteId);
     
     const response = await fetch(url.toString());
@@ -58,7 +57,7 @@ export class MCPClient {
 
   // Write Tools (return PreparedTx)
   async pinMetadata(metadata: any): Promise<{ cid: string }> {
-    const response = await fetch(`${this.baseUrl}/mcp/pin_metadata`, {
+    const response = await fetch(`${this.baseUrl}/pin_metadata`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(metadata),
@@ -74,7 +73,7 @@ export class MCPClient {
     gate: 'allowlist' | 'open' | 'passport_stub';
     duration_s: number;
   }): Promise<{ vote_id: string; tx: PreparedTx }> {
-    const response = await fetch(`${this.baseUrl}/mcp/start_vote`, {
+    const response = await fetch(`${this.baseUrl}/start_vote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ artCids, cfg: config }),
@@ -89,7 +88,7 @@ export class MCPClient {
     winner_cid: string;
     tally: Record<string, number>;
   }> {
-    const response = await fetch(`${this.baseUrl}/mcp/tally_vote`, {
+    const response = await fetch(`${this.baseUrl}/tally_vote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ vote_id: voteId }),
@@ -101,7 +100,7 @@ export class MCPClient {
   }
 
   async mintFinal(winnerCid: string, metadataCid: string): Promise<{ tx: PreparedTx }> {
-    const response = await fetch(`${this.baseUrl}/mcp/mint_final`, {
+    const response = await fetch(`${this.baseUrl}/mint_final`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ winner_cid: winnerCid, metadataCid }),
@@ -113,7 +112,7 @@ export class MCPClient {
   }
 
   async issueMedal(toAddress: string, id: number): Promise<{ tx: PreparedTx }> {
-    const response = await fetch(`${this.baseUrl}/mcp/issue_medal`, {
+    const response = await fetch(`${this.baseUrl}/issue_medal`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ toAddress, id }),
