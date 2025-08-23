@@ -1,0 +1,13 @@
+---
+description: Define or modify shared TypeScript types, JSON schemas, or metadata contracts.
+globs: ["packages/types/**", "**/types/**", "**/*.d.ts"]
+alwaysApply: false
+---
+
+# Types & Schemas Rule
+
+**Consult first:** `docs/context/agents_spec.md`, `docs/context/metadata_schema.md`, `docs/context/backend_api_spec.md`.
+
+- Implement types **exactly** as specified (`LorePack`, `ArtSet`, `VoteConfig`, `VoteResult`, `MintReceipt`, `AttestationReceipt`, `RunState`, `PreparedTx`).
+- Do not rename fields or change shapes. Update imports across apps when types change.
+- Provide zod or JSON Schema validators where helpful, but preserve field names and optionality.

@@ -1,0 +1,14 @@
+---
+description: Enforce clean code, small diffs, and explicit references to local specs in comments/PRs.
+globs: ["**/*"]
+alwaysApply: false
+---
+
+# Editor & Style Rule
+
+- Keep PRs small and map them to specific sections of:
+  - `PROJECT+BACKGROUND.md`
+  - `docs/context/*`
+- Add header comments in new files referencing the spec sections used (paths).
+- Prefer explicit types and narrow interfaces; avoid `any`.
+- Include TODOs only with file+line references to the spec that must be resolved later.

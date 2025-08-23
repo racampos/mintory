@@ -1,0 +1,20 @@
+---
+description: Write tests and wire the 3-minute demo flow.
+globs:
+  [
+    "**/__tests__/**",
+    "**/*.spec.*",
+    "docs/context/demo_script.md",
+    "docs/context/testing_plan.md",
+  ]
+alwaysApply: false
+---
+
+# Testing & Demo Rule
+
+**Consult first:** `docs/context/testing_plan.md`, `docs/context/demo_script.md`.
+
+- Unit (contracts): open/close vote, finalizeMint, medal mint.
+- Integration: MCP `start_vote` returns executable **PreparedTx**; `pin_metadata` CID resolves.
+- E2E: Start run → `lore_approval` → art → vote → finalize → tokenURI resolves → medal minted.
+- Implement a demo script runner or README steps that mirror `demo_script.md`.

@@ -1,0 +1,30 @@
+---
+description: Implement or modify the MCP HTTP server and tool contracts (read/write).
+globs: ["packages/mcp-server/**", "**/mcp*/**", "**/mcp-*/**"]
+alwaysApply: false
+---
+
+# MCP Tools Server Rule
+
+**Consult first:** `docs/context/mcp_tools_spec.md`, `docs/context/wallet_and_viem.md`.
+
+## Expose tools
+
+Read:
+
+- `GET /mcp/chain_info`
+- `GET /mcp/gasback_info?contract=...`
+- `GET /mcp/medal_of?address=...`
+
+Write (prepare calldata, no signing):
+
+- `POST /mcp/pin_cid`
+- `POST /mcp/pin_metadata`
+- `POST /mcp/start_vote`
+- `GET /mcp/vote_status`
+- `POST /mcp/tally_vote`
+- `POST /mcp/mint_final`
+- `POST /mcp/issue_medal`
+- `POST /mcp/eas_attest` (optional)
+
+**All write endpoints return `{ tx: PreparedTx }`** as defined in `mcp_tools_spec.md`. Never store secrets, never broadcast transactions.

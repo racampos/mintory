@@ -1,0 +1,23 @@
+---
+description: Build or modify the Next.js + Vercel AI SDK Curator UI, chat, Agent Console, or wallet flows.
+globs: ["apps/frontend/**", "**/*.tsx", "**/*.ts"]
+alwaysApply: false
+---
+
+# Frontend Curator Rule (Next.js + AI SDK)
+
+**Consult first:** `docs/context/frontend_ai_sdk.md`, `docs/context/backend_api_spec.md`, `docs/context/wallet_and_viem.md`, `docs/context/demo_script.md`.
+
+## Requirements
+
+- Left pane: Curator chat using **Vercel AI SDK**; use `tool()` for read-only MCP actions; `generateObject` for Lore edits.
+- Right pane: **Agent Console** showing per-agent events with emojis:
+  - 🧠 Lore, 🎨 Artist, 🗳️ Vote, 🪙 Mint, 🧾 Attest, 🛡️ Guard.
+- Subscribe to SSE updates; render links for IPFS CIDs, tx hashes, tokenURI.
+- Buttons map to `/runs/{id}/resume` decisions: `approve`, `edit`, `proceed`, `regen`, `finalize`.
+- Wallet (viem/wagmi) signs **PreparedTx** from MCP only.
+
+## Don'ts
+
+- Don't call private keys server-side.
+- Don't invent endpoints; follow `backend_api_spec.md`.

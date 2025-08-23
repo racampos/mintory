@@ -1,0 +1,14 @@
+---
+description: Manage environment variables, chain config, and addresses.json usage.
+globs: ["infra/**", "**/.env*", "**/networks.ts", "**/addresses.json"]
+alwaysApply: false
+---
+
+# Env & Addresses Rule
+
+**Consult first:** `docs/context/env_and_configs.md`, `docs/context/contracts_and_addresses.md`.
+
+- Load `RPC_URL`, `CHAIN_ID`, and contract addresses from `.env` + `infra/deploy/addresses.json`.
+- Provide `.env.example` with all required keys.
+- Do not hardcode private keys or secrets. Never commit real `.env`.
+- Frontend must read `NEXT_PUBLIC_*` vars only.

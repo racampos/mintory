@@ -1,0 +1,16 @@
+---
+description: Handle IPFS pinning, metadata JSON generation, and tokenURI composition.
+globs: ["packages/mcp-server/**", "apps/backend/**", "apps/frontend/**"]
+alwaysApply: false
+---
+
+# Metadata & IPFS Rule
+
+**Consult first:** `docs/context/metadata_schema.md`.
+
+- Before mint: pin **image CIDs** and **metadata JSON**. Store the metadata CID as tokenURI.
+- Metadata must include:
+  - `image` = `ipfs://WINNER_CID`
+  - `attributes`: Date, WinnerCID, Sources count
+  - `properties`: `summary_md`, `sources[]`, `prompt_seed{}`, optional `attestation_uri`
+- MCP exposes `pin_cid` and `pin_metadata`; backend orchestrator uses them; frontend displays CIDs in the console.

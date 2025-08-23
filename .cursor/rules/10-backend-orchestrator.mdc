@@ -1,0 +1,31 @@
+---
+description: Implement or modify the LangGraph backend (FastAPI/Node), state machine, checkpoints, or streaming.
+globs: ["apps/backend/**", "**/*backend*/**", "**/*.py"]
+alwaysApply: false
+---
+
+# Backend Orchestrator Rule (LangGraph + REST + SSE)
+
+**Consult first:** `docs/context/backend_api_spec.md`, `docs/context/langgraph_basics.md`, `docs/context/agents_spec.md`.
+
+## Must implement
+
+- Endpoints: `POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/stream` (SSE), `POST /runs/{id}/resume`.
+- Stream LangGraph updates via `astream(..., stream_mode="updates")` → push each update line to the SSE response.
+- Checkpointer: SQLite/Redis as defined in `env_and_configs.md`.
+- Interrupts (exact keys): `lore_approval`, `art_sanity` (optional), `finalize_mint`.
+
+## State
+
+Use `RunState` from `agents_spec.md`. Mutate via **pure deltas** returned from nodes/subgraphs.
+
+## Error handling
+
+- Transient external errors (pinning/RPC) → retry with backoff.
+- Irreversible actions (mint) only after **explicit** `finalize_mint` decision.
+- SSE: on disconnect, resume stream with latest known state.
+
+## Don'ts
+
+- No WebSockets unless explicitly requested (SSE is required).
+- No long-lived hidden globals; state lives in checkpointer.

@@ -1,0 +1,15 @@
+---
+description: Enforce hackathon security, licensing, and content constraints.
+globs:
+  - "**/*"
+alwaysApply: false
+---
+
+# Security & Licensing Rule
+
+**Consult first:** `docs/context/security_and_licensing.md`, `PROJECT+BACKGROUND.md`.
+
+- Signing only in the browser wallet; servers never hold keys or mnemonics.
+- Positive depictions for named figures; avoid sensitive/negative portrayals.
+- Document the image model and license in README; store prompts/seeds/sources in metadata for transparency.
+- No scraping live sources in backend during demo; treat sources as citations only.

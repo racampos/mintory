@@ -1,0 +1,28 @@
+---
+description: Always load the project's offline context pack and high-level goals. Apply to every task in this repo.
+globs:
+alwaysApply: true
+---
+
+# Attested History — Project Overview (Always Apply)
+
+**Single source of truth** for scope, constraints, and artifacts. Before generating code or changing files, **consult these local docs**:
+
+- `PROJECT+BACKGROUND.md`
+- `docs/context/README.md`
+- Core: `docs/context/agents_spec.md`, `docs/context/langgraph_basics.md`, `docs/context/backend_api_spec.md`, `docs/context/mcp_tools_spec.md`, `docs/context/contracts_and_addresses.md`, `docs/context/frontend_ai_sdk.md`, `docs/context/wallet_and_viem.md`, `docs/context/metadata_schema.md`, `docs/context/gasback_and_stack.md`
+- Supporting: `docs/context/prompts.md`, `docs/context/shape_basics.md`, `docs/context/testing_plan.md`, `docs/context/env_and_configs.md`, `docs/context/demo_script.md`, `docs/context/security_and_licensing.md`
+
+**Architecture (non-negotiable):**
+
+- Backend = LangGraph orchestrator with **REST + SSE** and **checkpointers + interrupts** at `lore_approval` (required), `art_sanity` (optional), `finalize_mint` (required).
+- Frontend = Next.js + Vercel AI SDK "Curator" UI; **EventSource** for streams; wallet signs **PreparedTx** only.
+- MCP server = read/write tools; **returns calldata**; never stores keys.
+- Contracts = minimal `DropManager` + `HistorianMedals` on **Shape testnet**.
+- Pin images + metadata to IPFS **before** mint; include summary/sources/prompt seed in metadata.
+
+**Rules of engagement:**
+
+- Do not invent chain IDs, addresses, or ABIs. Use placeholders from `contracts_and_addresses.md` until deployment.
+- Keep agents **modular with typed IO** as in `agents_spec.md`.
+- Prefer small PRs that map to the **demo_script.md** milestones.

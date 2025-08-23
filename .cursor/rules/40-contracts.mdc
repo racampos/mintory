@@ -1,0 +1,28 @@
+---
+description: Create or modify Solidity contracts for DropManager, HistorianMedals, or related deployment scripts.
+globs: ["packages/contracts/**", "**/*.sol"]
+alwaysApply: false
+---
+
+# Contracts Rule (Shape Testnet)
+
+**Consult first:** `docs/context/contracts_and_addresses.md`, `docs/context/gasback_and_stack.md`, `docs/context/metadata_schema.md`.
+
+## Contracts
+
+- `DropManager`:
+  - Functions: `openVote(string[] cids, VoteConfig cfg)`, `castVote(bytes32 voteId, uint index)`, `closeVote(bytes32 voteId)`, `finalizeMint(bytes32 voteId, string winnerCid, string tokenURI) returns (uint256 tokenId)`
+  - Events: `VoteOpened`, `VoteClosed`, `MintFinalized`
+  - Simplify voting to 1p1v + allowlist for demo.
+- `HistorianMedals` (ERC-1155):
+  - `mint(address to, uint256 id, uint256 amt, bytes data)`; constant `HISTORIAN_VOTER = 1`.
+
+## Deployment
+
+- Export deployed addresses to `infra/deploy/addresses.json`.
+- Use OpenZeppelin; keep ABIs minimal and stable for MCP.
+
+## Don'ts
+
+- Don't add complex royalty logic; not needed.
+- Don't rely on marketplace behavior; demo focuses on mint + events.

@@ -1,0 +1,19 @@
+---
+description: Add or fix streaming of run updates from the backend to the frontend.
+globs: ["apps/backend/**", "apps/frontend/**"]
+alwaysApply: false
+---
+
+# SSE Streaming Contract
+
+**Reference:** `docs/context/backend_api_spec.md`, `docs/context/frontend_ai_sdk.md`.
+
+- Endpoint: `GET /runs/{run_id}/stream`
+- Use **Server-Sent Events**:
+  - `Content-Type: text/event-stream`
+  - `Cache-Control: no-cache`
+  - `Connection: keep-alive`
+- Emit `event: update` with `data` as a compact JSON containing:
+  - `agent`, `level`, `message`, `links[]`, and the **RunState delta**.
+- Frontend uses `new EventSource(URL)`; implement exponential backoff reconnect.
+- Proxy note: if behind a proxy, disable buffering.
