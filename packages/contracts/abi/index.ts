@@ -2338,8 +2338,8 @@ export const CombinedAbi = [
   }
 ] as const;
 
-// Type exports
-export type { DropManager, HistorianMedals } from "./types";
+// Type exports (import from typechain-types)
+export type { DropManager, HistorianMedals } from "../typechain-types/contracts/index.js";
 
 // Re-export contract types for convenience
 export type DropManagerAbiType = typeof import("./DropManager.json");
