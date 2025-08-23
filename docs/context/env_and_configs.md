@@ -1,0 +1,26 @@
+# Environment & Configs
+
+## Frontend
+
+- NEXT_PUBLIC_BACKEND_URL=…
+- NEXT_PUBLIC_MCP_URL=…
+- NEXT_PUBLIC_RPC_URL=RPC_URL
+- NEXT_PUBLIC_CHAIN_ID=CHAIN_ID
+
+## Backend
+
+- BACKEND_PORT=8000
+- CHECKPOINTER_URL=sqlite:///state.db # or redis://…
+
+## MCP
+
+- MCP_PORT=4000
+- IPFS_PIN_URL=…
+- IPFS_PIN_KEY=…
+
+## Contracts (loaded from addresses.json at runtime)
+
+- DROP_MANAGER_ADDRESS=…
+- HISTORIAN_MEDALS_ADDRESS=…
+- NFT_ADDRESS=…
+
