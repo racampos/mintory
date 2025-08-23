@@ -96,19 +96,19 @@ async def create_run(request: CreateRunRequest, background_tasks: BackgroundTask
     
     run_id = str(uuid.uuid4())
     
-    # Initial state
-    initial_state = RunState(
-        run_id=run_id,
-        date_label=request.date_label,
-        lore=None,
-        art=None,
-        vote=None,
-        mint=None,
-        attest=None,
-        checkpoint=None,
-        error=None,
-        messages=[]
-    )
+    # Initial state (create as dict for LangGraph compatibility)
+    initial_state: RunState = {
+        "run_id": run_id,
+        "date_label": request.date_label,
+        "lore": None,
+        "art": None,
+        "vote": None,
+        "mint": None,
+        "attest": None,
+        "checkpoint": None,
+        "error": None,
+        "messages": []
+    }
     
     # Start the workflow in background
     background_tasks.add_task(start_workflow, run_id, initial_state)
@@ -120,21 +120,30 @@ async def start_workflow(run_id: str, initial_state: RunState):
     """Start workflow execution"""
     try:
         workflow = workflows["main"]
+        print(f"Starting workflow {run_id} with state: {initial_state}")
         
         # Store initial state
         simple_state.store_run_state(run_id, initial_state)
         
-        # Run workflow synchronously for now
+        # Run workflow - ensure input is a proper dict
+        print(f"Invoking workflow for {run_id}...")
         result = await workflow.ainvoke(initial_state)
+        print(f"Workflow {run_id} result: {result}")
         
         # Store final result
         simple_state.update_run_state(run_id, result)
         
-        print(f"Workflow {run_id} completed: {result}")
+        print(f"Workflow {run_id} completed successfully")
         
     except Exception as e:
         print(f"Workflow {run_id} error: {e}")
-        simple_state.update_run_state(run_id, {"error": str(e)})
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        
+        # Store error state
+        error_state = dict(initial_state)
+        error_state["error"] = str(e)
+        simple_state.update_run_state(run_id, error_state)
 
 
 @app.get("/runs/{run_id}")
@@ -158,27 +167,124 @@ async def stream_run(run_id: str):
     
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            workflow = workflows["main"]
-            config = {"configurable": {"thread_id": run_id}}
+            print(f"Starting SSE stream for run {run_id}")
             
-            # Stream updates directly - let the workflow handle state management
-            async for event in workflow.astream(None, config, stream_mode="updates"):
-                # Format SSE event
-                event_data = {
+            # Check if run exists
+            current_state = simple_state.get_run_state(run_id)
+            if not current_state:
+                error_data = {"run_id": run_id, "error": f"Run {run_id} not found"}
+                yield f"event: error\n"
+                yield f"data: {json.dumps(error_data)}\n\n"
+                return
+            
+            # If workflow is already complete, send all messages first, then completion
+            if current_state.get("mint") and not current_state.get("error"):
+                print(f"Run {run_id} already completed, sending all messages then completion event")
+                
+                # Send all agent messages
+                messages = current_state.get("messages", [])
+                for message in messages:
+                    yield f"event: update\n"
+                    yield f"data: {json.dumps(message)}\n\n"
+                    await asyncio.sleep(0.1)  # Small delay for better UX
+                
+                # Send final state update
+                state_update = {
                     "run_id": run_id,
-                    "event": event,
-                    "timestamp": str(uuid.uuid4())  # Use UUID as timestamp
+                    "state_update": {
+                        key: current_state.get(key)
+                        for key in ["lore", "art", "vote", "mint", "checkpoint"]
+                        if current_state.get(key) is not None
+                    }
                 }
-                
-                yield f"event: update\n"
-                yield f"data: {json.dumps(event_data)}\n\n"
-                
-                # Small delay to allow client to process
+                yield f"event: state\n"
+                yield f"data: {json.dumps(state_update)}\n\n"
                 await asyncio.sleep(0.1)
                 
+                # Send completion event
+                completion_data = {"run_id": run_id, "status": "completed"}
+                yield f"event: complete\n"
+                yield f"data: {json.dumps(completion_data)}\n\n"
+                return
+            
+            # If workflow has error, send messages first, then error
+            if current_state.get("error"):
+                print(f"Run {run_id} has error, sending messages then error event")
+                
+                # Send any messages that were generated before error
+                messages = current_state.get("messages", [])
+                for message in messages:
+                    yield f"event: update\n"
+                    yield f"data: {json.dumps(message)}\n\n"
+                    await asyncio.sleep(0.1)
+                
+                # Send error event
+                error_data = {"run_id": run_id, "error": current_state["error"]}
+                yield f"event: error\n"
+                yield f"data: {json.dumps(error_data)}\n\n"
+                return
+            
+            print(f"Starting live stream monitoring for run {run_id}")
+            last_message_count = 0
+            last_state = {}
+            
+            # Poll for state changes and stream them
+            for _ in range(300):  # 5 minutes max
+                current_state = simple_state.get_run_state(run_id)
+                
+                if not current_state:
+                    break
+                
+                # Check for new messages
+                messages = current_state.get("messages", [])
+                if len(messages) > last_message_count:
+                    for new_message in messages[last_message_count:]:
+                        yield f"event: update\n"
+                        yield f"data: {json.dumps(new_message)}\n\n"
+                    last_message_count = len(messages)
+                
+                # Check for significant state changes
+                state_changed = False
+                for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]:
+                    if current_state.get(key) != last_state.get(key):
+                        state_changed = True
+                        break
+                
+                if state_changed:
+                    # Send state update
+                    state_update = {
+                        "run_id": run_id,
+                        "state_update": {
+                            key: current_state.get(key)
+                            for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]
+                            if current_state.get(key) is not None
+                        }
+                    }
+                    yield f"event: state\n"
+                    yield f"data: {json.dumps(state_update)}\n\n"
+                    last_state = current_state.copy()
+                
+                # Check if workflow is complete
+                if current_state.get("mint") and not current_state.get("error"):
+                    completion_data = {"run_id": run_id, "status": "completed"}
+                    yield f"event: complete\n"
+                    yield f"data: {json.dumps(completion_data)}\n\n"
+                    break
+                
+                # Check for errors
+                if current_state.get("error"):
+                    error_data = {"run_id": run_id, "error": current_state["error"]}
+                    yield f"event: error\n"
+                    yield f"data: {json.dumps(error_data)}\n\n"
+                    break
+                
+                await asyncio.sleep(1)  # Poll every second
+                
         except Exception as e:
+            print(f"Stream error for {run_id}: {e}")
+            error_data = {"run_id": run_id, "error": str(e)}
             yield f"event: error\n"
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps(error_data)}\n\n"
     
     return StreamingResponse(
         event_generator(),

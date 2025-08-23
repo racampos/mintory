@@ -74,27 +74,119 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
         `/api/orchestrator/runs/${runState.run_id}/stream`
       );
 
+      // Handle different event types from the backend
+      es.addEventListener('update', (event) => {
+        try {
+          const messageData = JSON.parse(event.data);
+          const update: StreamUpdate = {
+            agent: messageData.agent,
+            level: messageData.level,
+            message: messageData.message,
+            links: messageData.links?.map((link: any) => link.href) || [],
+            timestamp: new Date().toISOString()
+          };
+          console.log('Received update event:', update);
+          onUpdate(update);
+        } catch (error) {
+          console.error('Failed to parse update event:', error);
+        }
+      });
+
+      es.addEventListener('state', (event) => {
+        try {
+          const stateData = JSON.parse(event.data);
+          console.log('Received state event:', stateData);
+          
+          // Update the run state with the new data
+          if (stateData.state_update) {
+            const stateUpdate: StreamUpdate = {
+              agent: 'System',
+              level: 'info',
+              message: 'State updated',
+              state_delta: stateData.state_update,
+              timestamp: new Date().toISOString()
+            };
+            onUpdate(stateUpdate);
+          }
+        } catch (error) {
+          console.error('Failed to parse state event:', error);
+        }
+      });
+
+      es.addEventListener('complete', (event) => {
+        try {
+          const completeData = JSON.parse(event.data);
+          console.log('Workflow completed:', completeData);
+          
+          const update: StreamUpdate = {
+            agent: 'System',
+            level: 'success',
+            message: 'Workflow completed successfully!',
+            timestamp: new Date().toISOString()
+          };
+          onUpdate(update);
+          
+          // Close the EventSource connection when workflow is complete
+          console.log('Closing EventSource connection - workflow complete');
+          es.close();
+          setEventSource(null);
+        } catch (error) {
+          console.error('Failed to parse complete event:', error);
+        }
+      });
+
+      es.addEventListener('error', (event) => {
+        try {
+          const errorData = JSON.parse(event.data);
+          console.error('Received error event:', errorData);
+          
+          const update: StreamUpdate = {
+            agent: 'System',
+            level: 'error',
+            message: `Error: ${errorData.error}`,
+            timestamp: new Date().toISOString()
+          };
+          onUpdate(update);
+          
+          // Close connection on error
+          console.log('Closing EventSource connection - error received');
+          es.close();
+          setEventSource(null);
+        } catch (error) {
+          console.error('Failed to parse error event:', error);
+        }
+      });
+
+      // Keep the default onmessage as fallback
       es.onmessage = (event) => {
+        console.log('Received default message event:', event.data);
         try {
           const update: StreamUpdate = JSON.parse(event.data);
           update.timestamp = new Date().toISOString();
           onUpdate(update);
         } catch (error) {
-          console.error('Failed to parse stream update:', error);
+          console.error('Failed to parse default message:', error);
         }
       };
 
       es.onerror = (error) => {
-        console.error('EventSource error:', error);
+        console.error('EventSource connection error:', error);
         
-        // Implement exponential backoff reconnection
-        const delay = Math.min(1000 * Math.pow(2, 1), 10000); // Max 10s
-        
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (es.readyState === EventSource.CLOSED) {
-            connectToStream();
-          }
-        }, delay);
+        // Only reconnect if the EventSource is still in a connecting/open state
+        // Don't reconnect if we explicitly closed it (completed/error workflows)
+        if (eventSource && es.readyState !== EventSource.CLOSED) {
+          console.log('Attempting to reconnect EventSource...');
+          // Implement exponential backoff reconnection
+          const delay = Math.min(1000 * Math.pow(2, 1), 10000); // Max 10s
+          
+          reconnectTimeoutRef.current = setTimeout(() => {
+            if (eventSource && es.readyState === EventSource.CLOSED) {
+              connectToStream();
+            }
+          }, delay);
+        } else {
+          console.log('EventSource was explicitly closed, not reconnecting');
+        }
       };
 
       es.onopen = () => {
