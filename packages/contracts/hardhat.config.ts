@@ -26,7 +26,7 @@ const config: HardhatUserConfig = {
     },
     // Shape Testnet (for testing)
     shapetestnet: {
-      url: process.env.SHAPE_RPC_URL || "https://sepolia.shape.network",
+      url: process.env.SHAPE_TESTNET_RPC_URL || "https://shape-sepolia.g.alchemy.com/v2/lFQY2zhDOR9h_q3Z0CNTWMdLy7q8n692",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 11011, // Shape testnet chain ID
     },

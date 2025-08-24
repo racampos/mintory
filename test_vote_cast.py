@@ -26,7 +26,7 @@ load_dotenv()
 # Shape Testnet Configuration
 CHAIN_ID = 11011
 RPC_URL = "https://shape-sepolia.g.alchemy.com/v2/lFQY2zhDOR9h_q3Z0CNTWMdLy7q8n692"
-DROP_MANAGER_ADDRESS = "0x5C9c6f936C4fE709832A414f80BAbb063ca31a0b"
+DROP_MANAGER_ADDRESS = "0x552182c404587c4e8648ab6da706b18d45f86005"
 
 # DropManager ABI - corrected structure from MCP server
 DROP_MANAGER_ABI = [

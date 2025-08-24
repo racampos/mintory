@@ -107,12 +107,12 @@ contract DropManager is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Open a new voting session
+     * @dev Open a new voting session (now accessible to any user)
      */
     function openVote(
         string[] calldata cids,
         VoteConfig calldata config
-    ) external onlyOwner returns (bytes32 voteId) {
+    ) external returns (bytes32 voteId) {
         // Validate inputs
         if (cids.length == 0) revert EmptyCIDs();
         if (config.duration == 0) revert InvalidDuration(config.duration);
@@ -240,7 +240,7 @@ contract DropManager is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Finalize mint after vote is closed
+     * @dev Finalize mint after vote is closed (now accessible to any user)
      */
     function finalizeMint(
         bytes32 voteId,
@@ -250,7 +250,6 @@ contract DropManager is Ownable, ReentrancyGuard {
         external
         voteExists(voteId)
         voteClosed(voteId)
-        onlyOwner
         returns (uint256 tokenId)
     {
         Vote storage vote = votes[voteId];
