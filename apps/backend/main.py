@@ -401,16 +401,22 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
         if not checkpoint:
             return {"status": "already_completed", "state": current_state}
         
-        # Handle different resume decisions - just clear checkpoint, don't restart workflow
+        # Handle different resume decisions
         if request.checkpoint == "lore_approval":
             if request.decision == "approve":
                 # Just approve - no input needed, workflow will continue from checkpoint
                 current_state["checkpoint"] = None
             elif request.decision == "edit":
-                # Apply edits from payload
-                if "lore" in request.payload:
-                    current_state["lore"] = request.payload["lore"]
-                current_state["checkpoint"] = None
+                # User provided edit instructions - regenerate lore with feedback
+                edit_instructions = request.payload.get("instructions", "")
+                if edit_instructions:
+                    # Regenerate lore with user feedback
+                    await regenerate_lore_with_feedback(run_id, current_state, edit_instructions)
+                    current_state = simple_state.get_run_state(run_id)  # Get updated state
+                    current_state["checkpoint"] = None
+                else:
+                    # No instructions provided, just approve
+                    current_state["checkpoint"] = None
         
         elif request.checkpoint == "finalize_mint":
             if request.decision == "finalize":
@@ -441,6 +447,75 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def regenerate_lore_with_feedback(run_id: str, current_state: Dict[str, Any], edit_instructions: str):
+    """Regenerate lore with user feedback incorporated"""
+    try:
+        print(f"🔄 Regenerating lore for {run_id} with user feedback: {edit_instructions[:50]}...")
+        
+        # Add a message showing the regeneration is starting
+        feedback_message = {
+            "agent": "System",
+            "level": "info",
+            "message": f"Incorporating user feedback: {edit_instructions}",
+            "ts": str(uuid.uuid4())
+        }
+        
+        current_messages = current_state.get("messages", [])
+        current_messages.append(feedback_message)
+        current_state["messages"] = current_messages
+        simple_state.update_run_state(run_id, current_state)
+        
+        # Import the lore agent
+        from agents.lore import lore_agent
+        
+        # Create enhanced state with edit instructions
+        enhanced_state = current_state.copy()
+        enhanced_state["edit_instructions"] = edit_instructions
+        enhanced_state["regenerating"] = True
+        
+        # Call lore agent with the enhanced state
+        print(f"🔄 Calling lore agent with edit instructions for {run_id}")
+        result = await lore_agent(enhanced_state)
+        
+        # Update the state with the new lore
+        if "lore" in result:
+            current_state["lore"] = result["lore"]
+            print(f"🔄 Updated lore for {run_id}")
+        
+        # Add the new messages from the regeneration
+        if "messages" in result:
+            current_messages.extend(result["messages"])
+            current_state["messages"] = current_messages
+        
+        # Add a completion message
+        completion_message = {
+            "agent": "System", 
+            "level": "success",
+            "message": "Lore regenerated based on your feedback",
+            "ts": str(uuid.uuid4())
+        }
+        current_messages.append(completion_message)
+        current_state["messages"] = current_messages
+        
+        # Update state in storage
+        simple_state.update_run_state(run_id, current_state)
+        print(f"🔄 Lore regeneration completed for {run_id}")
+        
+    except Exception as e:
+        print(f"🔄 Lore regeneration failed for {run_id}: {e}")
+        # Add error message
+        error_message = {
+            "agent": "System",
+            "level": "error", 
+            "message": f"Failed to regenerate lore: {str(e)}",
+            "ts": str(uuid.uuid4())
+        }
+        current_messages = current_state.get("messages", [])
+        current_messages.append(error_message)
+        current_state["messages"] = current_messages
+        simple_state.update_run_state(run_id, current_state)
 
 
 async def continue_workflow_after_resume(run_id: str, config: Dict[str, Any]):

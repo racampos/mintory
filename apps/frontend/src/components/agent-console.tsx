@@ -432,7 +432,7 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
                             </span>
                           )}
                         </div>
-                        <p className="text-sm">{update.message}</p>
+                        <p className="text-sm whitespace-pre-wrap">{update.message}</p>
                         
                         {/* Links */}
                         {update.links && update.links.length > 0 && (

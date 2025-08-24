@@ -71,13 +71,25 @@ async def lore_agent(state: RunState) -> Dict[str, Any]:
     date_label = state["date_label"]
     run_id = state.get("run_id")
     
+    # Check if this is a regeneration with user feedback
+    edit_instructions = state.get("edit_instructions")
+    is_regenerating = state.get("regenerating", False)
+    
     # Create progress message for LLM research and emit it immediately
-    research_message = {
-        "agent": "Lore",
-        "level": "info", 
-        "message": f"Researching historical significance of {date_label}...",
-        "ts": str(uuid.uuid4())
-    }
+    if is_regenerating and edit_instructions:
+        research_message = {
+            "agent": "Lore",
+            "level": "info", 
+            "message": f"Regenerating lore for {date_label} based on your feedback...",
+            "ts": str(uuid.uuid4())
+        }
+    else:
+        research_message = {
+            "agent": "Lore",
+            "level": "info", 
+            "message": f"Researching historical significance of {date_label}...",
+            "ts": str(uuid.uuid4())
+        }
     
     # Emit the "researching" message immediately for real-time UX
     print(f"🧠 LORE: Starting research for {run_id} - {date_label}")
@@ -94,8 +106,8 @@ async def lore_agent(state: RunState) -> Dict[str, Any]:
         llm_client = get_llm_client()
         logger.info(f"Starting LLM research for date: {date_label}")
         
-        # Use the specialized generate_lore_pack method
-        lore_pack_model, llm_response = await llm_client.generate_lore_pack(date_label)
+        # Use the specialized generate_lore_pack method with optional edit instructions
+        lore_pack_model, llm_response = await llm_client.generate_lore_pack(date_label, edit_instructions)
         
         # Convert Pydantic model to dict for state compatibility
         lore_pack_dict = lore_pack_model.model_dump()
@@ -106,26 +118,59 @@ async def lore_agent(state: RunState) -> Dict[str, Any]:
         logger.info(f"LLM research completed for {date_label}: {llm_response.usage['total_tokens']} tokens used")
         
         # Create success message with source links
-        success_message = {
-            "agent": "Lore", 
-            "level": "success",
-            "message": f"Generated historical research for {date_label} ({len(lore_pack_dict['summary_md'].split())} words, {len(lore_pack_dict['bullet_facts'])} facts, {len(lore_pack_dict['sources'])} sources)",
-            "ts": str(uuid.uuid4()),
-            "links": [
-                {"label": f"Source {i+1}", "href": url} 
-                for i, url in enumerate(lore_pack_dict["sources"][:3])
-            ]
-        }
+        if is_regenerating and edit_instructions:
+            success_message = {
+                "agent": "Lore", 
+                "level": "success",
+                "message": f"Regenerated historical research for {date_label} based on your feedback ({len(lore_pack_dict['summary_md'].split())} words, {len(lore_pack_dict['bullet_facts'])} facts, {len(lore_pack_dict['sources'])} sources)",
+                "ts": str(uuid.uuid4()),
+                "links": [
+                    {"label": f"Source {i+1}", "href": url} 
+                    for i, url in enumerate(lore_pack_dict["sources"][:3])
+                ]
+            }
+        else:
+            success_message = {
+                "agent": "Lore", 
+                "level": "success",
+                "message": f"Generated historical research for {date_label} ({len(lore_pack_dict['summary_md'].split())} words, {len(lore_pack_dict['bullet_facts'])} facts, {len(lore_pack_dict['sources'])} sources)",
+                "ts": str(uuid.uuid4()),
+                "links": [
+                    {"label": f"Source {i+1}", "href": url} 
+                    for i, url in enumerate(lore_pack_dict["sources"][:3])
+                ]
+            }
         
         print(f"🧠 LORE: Research completed for {run_id} - {len(lore_pack_dict['summary_md'].split())} words")
+        
+        # Create a formatted lore content message for user review
+        lore_content_message = {
+            "agent": "Lore",
+            "level": "info",
+            "message": f"""📜 Generated Lore for {date_label}
+
+{lore_pack_dict['summary_md']}
+
+🔑 Key Facts:
+{chr(10).join(f"• {fact}" for fact in lore_pack_dict['bullet_facts'])}
+
+🎨 Art Generation Style:
+• Style: {lore_pack_dict['prompt_seed']['style']}
+• Palette: {lore_pack_dict['prompt_seed']['palette']}  
+• Motifs: {', '.join(lore_pack_dict['prompt_seed']['motifs'])}""",
+            "ts": str(uuid.uuid4())
+        }
         
         # Only return the success message since research message was already emitted immediately
         result = {
             "lore": lore_pack_dict,
-            "checkpoint": "lore_approval",  # Restore checkpoint for user approval
-            "messages": [success_message]  # research_message already emitted above
+            "messages": [success_message, lore_content_message]  # Show completion + content
         }
-        print(f"🧠 LORE: Returning {len(result['messages'])} additional messages: {[msg['agent'] for msg in result['messages']]}")
+        
+        # Only set checkpoint if this is initial generation, not regeneration
+        if not is_regenerating:
+            result["checkpoint"] = "lore_approval"
+        print(f"🧠 LORE: Returning {len(result['messages'])} messages: {[msg['agent'] for msg in result['messages']]}")
         return result
         
     except Exception as e:

@@ -112,7 +112,7 @@ export function CuratorChat({ onRunStart }: CuratorChatProps) {
                     {message.role === 'user' ? 'You' : 'Curator'}
                   </span>
                 </div>
-                <div className="text-sm">{message.content}</div>
+                <div className="text-sm whitespace-pre-wrap">{message.content}</div>
                 
                 {/* Tool Call Indicators (optional - shows which tools were used) */}
                 {message.toolInvocations && message.toolInvocations.length > 0 && (

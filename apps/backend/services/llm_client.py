@@ -263,12 +263,13 @@ Respond only with the JSON object, no additional text or explanation.
             logger.error(f"Model validation error: {e}")
             raise LLMAPIError(f"Failed to validate structured output: {e}")
     
-    async def generate_lore_pack(self, date_label: str) -> tuple[LorePack, LLMResponse]:
+    async def generate_lore_pack(self, date_label: str, edit_instructions: Optional[str] = None) -> tuple[LorePack, LLMResponse]:
         """
         Generate a LorePack for historical research (specialized method for Lore Agent)
         
         Args:
             date_label: Historical date to research
+            edit_instructions: Optional user feedback for regeneration
             
         Returns:
             Tuple of (LorePack, raw_response)
@@ -303,10 +304,18 @@ Focus on technological, cultural, or socially significant events. Make it inspir
 Respond ONLY with the JSON object, no additional text before or after.
 """
         
+        # Construct user message with optional edit instructions
+        base_content = f"Research and provide historical context for this date: {date_label}. Focus on events that would inspire compelling digital art creation."
+        
+        if edit_instructions:
+            user_content = f"{base_content}\n\nIMPORTANT: The user has provided feedback for improvement:\n\"{edit_instructions}\"\n\nPlease incorporate this feedback and regenerate the historical research with the requested changes."
+        else:
+            user_content = base_content
+        
         messages = [
             LLMMessage(
                 role="user",
-                content=f"Research and provide historical context for this date: {date_label}. Focus on events that would inspire compelling digital art creation."
+                content=user_content
             )
         ]
         
