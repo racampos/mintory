@@ -137,21 +137,27 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
 
       es.addEventListener('error', (event) => {
         try {
-          const errorData = JSON.parse(event.data);
-          console.error('Received error event:', errorData);
-          
-          const update: StreamUpdate = {
-            agent: 'System',
-            level: 'error',
-            message: `Error: ${errorData.error}`,
-            timestamp: new Date().toISOString()
-          };
-          onUpdate(update);
-          
-          // Close connection on error
-          console.log('Closing EventSource connection - error received');
-          es.close();
-          setEventSource(null);
+          // Only try to parse if there's actual data (custom backend error)
+          if (event.data && event.data !== 'undefined') {
+            const errorData = JSON.parse(event.data);
+            console.error('Received custom backend error event:', errorData);
+            
+            const update: StreamUpdate = {
+              agent: 'System',
+              level: 'error',
+              message: `Error: ${errorData.error}`,
+              timestamp: new Date().toISOString()
+            };
+            onUpdate(update);
+            
+            // Close connection on custom backend error
+            console.log('Closing EventSource connection - backend error received');
+            es.close();
+            setEventSource(null);
+          } else {
+            // This is a native browser error event, let es.onerror handle it
+            console.log('Ignoring native browser error event (no data), es.onerror will handle connection issues');
+          }
         } catch (error) {
           console.error('Failed to parse error event:', error);
         }

@@ -25,6 +25,10 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
             }]
         }
     
+    # Small delay to allow SSE polling to detect intermediate state changes
+    import time
+    time.sleep(0.05)  # 50ms delay for real-time streaming
+    
     # Stub implementation - in production this would:
     # 1. Call image generation API (DALL-E, Midjourney, etc.)
     # 2. Pin images to IPFS via MCP tools
@@ -63,7 +67,9 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
         ]
     }
     
-    return {
+    result = {
         "art": art_set,
         "messages": [message]
     }
+    print(f"🎨 ARTIST: Returning {len(result['messages'])} messages: {[msg['agent'] for msg in result['messages']]}")
+    return result

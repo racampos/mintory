@@ -69,14 +69,25 @@ async def lore_agent(state: RunState) -> Dict[str, Any]:
     - prompt_seed: Art generation guidance (style, palette, motifs, negative)
     """
     date_label = state["date_label"]
+    run_id = state.get("run_id")
     
-    # Create progress message for LLM research
+    # Create progress message for LLM research and emit it immediately
     research_message = {
         "agent": "Lore",
         "level": "info", 
         "message": f"Researching historical significance of {date_label}...",
         "ts": str(uuid.uuid4())
     }
+    
+    # Emit the "researching" message immediately for real-time UX
+    print(f"🧠 LORE: Starting research for {run_id} - {date_label}")
+    if run_id:
+        import simple_state
+        current_state = simple_state.get_run_state(run_id) or {}
+        current_messages = current_state.get("messages", [])
+        current_messages.append(research_message)
+        simple_state.update_run_state(run_id, {"messages": current_messages})
+        print(f"🧠 LORE: Immediately emitted research message, state now has {len(current_messages)} messages")
     
     try:
         # Get LLM client and generate real historical research
@@ -106,11 +117,16 @@ async def lore_agent(state: RunState) -> Dict[str, Any]:
             ]
         }
         
-        return {
+        print(f"🧠 LORE: Research completed for {run_id} - {len(lore_pack_dict['summary_md'].split())} words")
+        
+        # Only return the success message since research message was already emitted immediately
+        result = {
             "lore": lore_pack_dict,
             "checkpoint": "lore_approval",
-            "messages": [research_message, success_message]
+            "messages": [success_message]  # research_message already emitted above
         }
+        print(f"🧠 LORE: Returning {len(result['messages'])} additional messages: {[msg['agent'] for msg in result['messages']]}")
+        return result
         
     except Exception as e:
         logger.error(f"Lore agent failed for date {date_label}: {e}")
@@ -161,8 +177,11 @@ The significance of this date extends to broader themes of human progress, techn
             "links": [{"label": f"Source {i+1}", "href": url} for i, url in enumerate(fallback_lore_pack["sources"][:3])]
         }
         
+        print(f"🧠 LORE: Using fallback content for {run_id} due to error")
+        
+        # Only return the error message since research message was already emitted immediately above
         return {
             "lore": fallback_lore_pack, 
             "checkpoint": "lore_approval",
-            "messages": [research_message, error_message]
+            "messages": [error_message]  # research_message already emitted above
         }

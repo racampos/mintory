@@ -31,6 +31,10 @@ async def mint_agent(state: RunState) -> Dict[str, Any]:
     winner_cid = vote["result"]["winner_cid"]
     
     try:
+        # Small delay to allow SSE polling to detect intermediate state changes
+        import asyncio
+        await asyncio.sleep(0.05)  # 50ms delay for real-time streaming
+        
         # Step 1: Create and pin metadata to IPFS
         metadata = {
             "name": f"{state['date_label']} — Historical NFT",

@@ -34,6 +34,10 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
     )
     
     try:
+        # Small delay to allow SSE polling to detect intermediate state changes
+        import asyncio
+        await asyncio.sleep(0.05)  # 50ms delay for real-time streaming
+        
         # Call MCP server to start vote
         # In production, this would call the actual MCP server
         # For now, simulate the vote process
@@ -93,6 +97,10 @@ async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
         }
     
     try:
+        # Small delay to allow SSE polling to detect intermediate state changes
+        import asyncio
+        await asyncio.sleep(0.05)  # 50ms delay for real-time streaming
+        
         # In production, call MCP server to get vote results
         # For demo, simulate a vote result
         

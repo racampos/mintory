@@ -9,6 +9,10 @@ import uuid
 from typing import AsyncGenerator, Dict, Any
 from contextlib import asynccontextmanager
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -117,7 +121,7 @@ async def create_run(request: CreateRunRequest, background_tasks: BackgroundTask
 
 
 async def start_workflow(run_id: str, initial_state: RunState):
-    """Start workflow execution"""
+    """Start workflow execution with real-time streaming"""
     try:
         workflow = workflows["main"]
         print(f"Starting workflow {run_id} with state: {initial_state}")
@@ -125,15 +129,32 @@ async def start_workflow(run_id: str, initial_state: RunState):
         # Store initial state
         simple_state.store_run_state(run_id, initial_state)
         
-        # Run workflow - ensure input is a proper dict
-        print(f"Invoking workflow for {run_id}...")
-        result = await workflow.ainvoke(initial_state)
-        print(f"Workflow {run_id} result: {result}")
+        # SSE polling is ultra-fast (10ms), no startup delay needed
+        print(f"Starting workflow immediately for {run_id}...")
         
-        # Store final result
-        simple_state.update_run_state(run_id, result)
+        # Run workflow with streaming - use "values" mode to get accumulated state after each node
+        print(f"Streaming workflow for {run_id}...")
+        async for chunk in workflow.astream(initial_state, stream_mode="values"):
+            print(f"📡 WORKFLOW: Node completed for {run_id}, accumulated state has {len(chunk.get('messages', []))} messages")
+            
+            # Debug: show which agents have completed
+            completed_agents = []
+            for key in ['lore', 'art', 'vote', 'mint']:
+                if chunk.get(key) is not None:
+                    completed_agents.append(key)
+            print(f"📡 WORKFLOW: Completed agents: {completed_agents}")
+            
+            # Show messages in this accumulated state
+            if chunk.get('messages'):
+                print(f"📡 WORKFLOW: Messages in accumulated state:")
+                for i, msg in enumerate(chunk['messages']):
+                    print(f"  Message {i}: {msg.get('agent', '?')} - {msg.get('message', '')[:50]}...")
+            
+            # Update state immediately with accumulated state for real-time streaming
+            simple_state.update_run_state(run_id, chunk)
+            print(f"📡 WORKFLOW: Updated state for {run_id} with {len(chunk.get('messages', []))} messages")
         
-        print(f"Workflow {run_id} completed successfully")
+        print(f"Workflow {run_id} streaming completed successfully")
         
     except Exception as e:
         print(f"Workflow {run_id} error: {e}")
@@ -229,19 +250,33 @@ async def stream_run(run_id: str):
             last_state = {}
             
             # Poll for state changes and stream them
-            for _ in range(300):  # 5 minutes max
-                current_state = simple_state.get_run_state(run_id)
-                
-                if not current_state:
-                    break
+            for poll_count in range(300):  # 5 minutes max
+                try:
+                    current_state = simple_state.get_run_state(run_id)
+                    print(f"SSE Poll #{poll_count} for {run_id}: {len(current_state.get('messages', []))} messages, keys: {list(current_state.keys())}")
+                    
+                    if not current_state:
+                        print(f"No state found for {run_id}, ending SSE stream")
+                        break
+                except Exception as poll_error:
+                    print(f"Error during SSE poll #{poll_count} for {run_id}: {poll_error}")
+                    raise
                 
                 # Check for new messages
                 messages = current_state.get("messages", [])
                 if len(messages) > last_message_count:
-                    for new_message in messages[last_message_count:]:
-                        yield f"event: update\n"
-                        yield f"data: {json.dumps(new_message)}\n\n"
-                    last_message_count = len(messages)
+                    print(f"New messages detected: {len(messages)} vs {last_message_count}")
+                    try:
+                        for new_message in messages[last_message_count:]:
+                            print(f"Streaming message: {new_message.get('agent')} - {new_message.get('message', '')[:50]}")
+                            yield f"event: update\n"
+                            yield f"data: {json.dumps(new_message)}\n\n"
+                            print(f"Successfully streamed message from {new_message.get('agent')}")
+                        last_message_count = len(messages)
+                        print(f"Updated last_message_count to {last_message_count}")
+                    except Exception as stream_error:
+                        print(f"Error streaming messages for {run_id}: {stream_error}")
+                        raise
                 
                 # Check for significant state changes
                 state_changed = False
@@ -251,34 +286,50 @@ async def stream_run(run_id: str):
                         break
                 
                 if state_changed:
-                    # Send state update
-                    state_update = {
-                        "run_id": run_id,
-                        "state_update": {
-                            key: current_state.get(key)
-                            for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]
-                            if current_state.get(key) is not None
+                    print(f"State changed for {run_id}, sending state update")
+                    try:
+                        # Send state update
+                        state_update = {
+                            "run_id": run_id,
+                            "state_update": {
+                                key: current_state.get(key)
+                                for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]
+                                if current_state.get(key) is not None
+                            }
                         }
-                    }
-                    yield f"event: state\n"
-                    yield f"data: {json.dumps(state_update)}\n\n"
-                    last_state = current_state.copy()
+                        yield f"event: state\n"
+                        yield f"data: {json.dumps(state_update)}\n\n"
+                        print(f"Successfully sent state update for {run_id}")
+                        last_state = current_state.copy()
+                    except Exception as state_error:
+                        print(f"Error sending state update for {run_id}: {state_error}")
+                        raise
                 
                 # Check if workflow is complete
                 if current_state.get("mint") and not current_state.get("error"):
-                    completion_data = {"run_id": run_id, "status": "completed"}
-                    yield f"event: complete\n"
-                    yield f"data: {json.dumps(completion_data)}\n\n"
-                    break
+                    print(f"Workflow {run_id} completed, ending SSE stream")
+                    try:
+                        completion_data = {"run_id": run_id, "status": "completed"}
+                        yield f"event: complete\n"
+                        yield f"data: {json.dumps(completion_data)}\n\n"
+                        print(f"Successfully sent completion event for {run_id}")
+                        break
+                    except Exception as completion_error:
+                        print(f"Error sending completion event for {run_id}: {completion_error}")
+                        raise
                 
                 # Check for errors
                 if current_state.get("error"):
+                    print(f"Workflow {run_id} has error, ending SSE stream")
                     error_data = {"run_id": run_id, "error": current_state["error"]}
                     yield f"event: error\n"
                     yield f"data: {json.dumps(error_data)}\n\n"
                     break
                 
-                await asyncio.sleep(1)  # Poll every second
+                await asyncio.sleep(0.01)  # Poll every 10ms for ultra-fast real-time streaming
+            
+            # If we exit the poll loop without completion/error
+            print(f"SSE polling loop ended for {run_id} (max iterations reached or other reason)")
                 
         except Exception as e:
             print(f"Stream error for {run_id}: {e}")
