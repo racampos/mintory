@@ -58,6 +58,7 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
         
         print(f"🗳️ VOTE: Real vote created with ID: {vote_id}")
         print(f"🗳️ VOTE: PreparedTx ready for wallet signing")
+        print(f"🗳️ VOTE: MCP returned gas limit: {getattr(prepared_tx, 'gas', 'None')}")
         
         # Create VoteState with real blockchain data
         vote_state = VoteState(
@@ -83,7 +84,7 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
             to=prepared_tx.to,
             data=prepared_tx.data,
             value=prepared_tx.value if hasattr(prepared_tx, 'value') and prepared_tx.value is not None else "0x0",
-            gas=prepared_tx.gas if hasattr(prepared_tx, 'gas') else 100000
+            gas=max(prepared_tx.gas if hasattr(prepared_tx, 'gas') and prepared_tx.gas else 0, 500000)
         )
         
         print(f"🗳️ VOTE: PreparedTx object: {prepared_tx_obj.dict()}")
