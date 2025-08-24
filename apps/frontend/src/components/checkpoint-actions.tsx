@@ -37,6 +37,12 @@ const checkpointInfo = {
     icon: Sparkles,
     color: 'text-purple-500',
   },
+  vote_tx_approval: {
+    title: 'Vote Transaction Confirmation',
+    description: 'Review and confirm the blockchain vote transaction',
+    icon: Vote,
+    color: 'text-orange-500',
+  },
   finalize_mint: {
     title: 'Finalize NFT Mint',
     description: 'Complete the minting process after voting',
@@ -190,6 +196,86 @@ export function CheckpointActions({
     </div>
   );
 
+  const renderVoteTxApprovalActions = () => (
+    <div className="space-y-4">
+      {runState.vote && (
+        <div className="p-4 bg-muted rounded-lg">
+          <h4 className="font-medium mb-3">📊 Vote Details</h4>
+          <div className="text-sm space-y-2">
+            <div>
+              <span className="font-medium">Vote ID:</span>{' '}
+              <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+                {runState.vote.id}
+              </code>
+            </div>
+            <div>
+              <span className="font-medium">Duration:</span> {runState.vote.config?.duration_s}s
+            </div>
+            <div>
+              <span className="font-medium">Method:</span> {runState.vote.config?.method}
+            </div>
+            <div>
+              <span className="font-medium">Gate:</span> {runState.vote.config?.gate}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {runState.prepared_tx && (
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <h4 className="font-medium mb-3 text-blue-800">🔐 Transaction Preview</h4>
+          <div className="text-sm space-y-2">
+            <div>
+              <span className="font-medium text-blue-700">To:</span>{' '}
+              <code className="text-xs bg-blue-100 px-2 py-1 rounded">
+                {runState.prepared_tx.to}
+              </code>
+            </div>
+            <div>
+              <span className="font-medium text-blue-700">Value:</span>{' '}
+              {runState.prepared_tx.value || '0'} ETH
+            </div>
+            <div>
+              <span className="font-medium text-blue-700">Gas Limit:</span>{' '}
+              {runState.prepared_tx.gas?.toLocaleString() || 'N/A'}
+            </div>
+            <div>
+              <span className="font-medium text-blue-700">Data:</span>{' '}
+              <code className="text-xs bg-blue-100 px-2 py-1 rounded break-all">
+                {runState.prepared_tx.data?.slice(0, 42)}...
+              </code>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+        <div className="flex items-center gap-2 text-orange-800">
+          <Vote className="h-4 w-4" />
+          <span className="text-sm font-medium">Ready to Sign Transaction</span>
+        </div>
+        <p className="text-xs text-orange-700 mt-1">
+          This will create a blockchain vote with the generated art options. You'll need to sign the transaction in your wallet.
+        </p>
+      </div>
+
+      <Button
+        onClick={() => {
+          // For hackathon demo: simulate successful transaction
+          // In production, this would trigger wallet signing and get real tx_hash
+          const mockTxHash = `0x${Math.random().toString(16).substring(2).padStart(64, '0')}`;
+          handleAction('confirm', { tx_hash: mockTxHash });
+        }}
+        disabled={isSubmitting}
+        className="w-full"
+        size="lg"
+      >
+        <Vote className="h-4 w-4 mr-2" />
+        {isSubmitting ? 'Processing...' : 'Confirm & Sign Transaction'}
+      </Button>
+    </div>
+  );
+
   const renderFinalizeMintActions = () => (
     <div className="space-y-4">
       {runState.vote_result && (
@@ -232,6 +318,8 @@ export function CheckpointActions({
         return renderLoreApprovalActions();
       case 'art_sanity':
         return renderArtSanityActions();
+      case 'vote_tx_approval':
+        return renderVoteTxApprovalActions();
       case 'finalize_mint':
         return renderFinalizeMintActions();
       default:

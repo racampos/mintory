@@ -323,8 +323,9 @@ _Replace vote simulation with MCP integration_
 _Integrate real MCP start_vote + add vote transaction checkpoint_
 
 **✅ Implemented:**
+
 - Replace stubbed vote creation with real MCP `start_vote` call
-- Add `vote_tx_approval` checkpoint for user transaction confirmation  
+- Add `vote_tx_approval` checkpoint for user transaction confirmation
 - Return `PreparedTx` for frontend wallet signing
 - Maintain two-agent structure: `vote_agent` (start) + `tally_vote_agent` (poll)
 - **Test**: MCP `start_vote` returns real vote_id + valid PreparedTx
@@ -335,6 +336,7 @@ _Integrate real MCP start_vote + add vote transaction checkpoint_
 _Add workflow checkpoint for vote transaction confirmation_
 
 **✅ Implemented:**
+
 - Add `interrupt_after=["vote"]` to LangGraph workflow
 - Implement checkpoint resume handler for `vote_tx_approval`
 - Frontend integration: transaction confirmation → `/resume` with tx_hash
@@ -347,9 +349,10 @@ _Add workflow checkpoint for vote transaction confirmation_
 _Real-time vote status polling with async SSE updates_
 
 **📋 Tasks:**
+
 - Replace stubbed tally with real MCP `get_vote_status` polling (5s interval)
 - Implement async polling loop with SSE streaming updates ("Vote in progress...")
-- Add timeout fallback: if `ends_at` expired → pick index 0, record `fallback: true`  
+- Add timeout fallback: if `ends_at` expired → pick index 0, record `fallback: true`
 - Call MCP `tally_vote` for natural completion or implement fallback logic
 - **Test**: Live polling updates, timeout triggers fallback correctly
 - **Files**: `apps/backend/agents/vote.py`
@@ -359,6 +362,7 @@ _Real-time vote status polling with async SSE updates_
 _UI for vote confirmation and live progress_
 
 **📋 Tasks:**
+
 - Add vote transaction confirmation modal with PreparedTx details
 - Display "Vote in progress..." during polling phase
 - Handle vote checkpoint resume flow
@@ -371,6 +375,7 @@ _UI for vote confirmation and live progress_
 _End-to-end validation of real voting integration_
 
 **📋 Tasks:**
+
 - Unit tests: Mock MCP responses, timeout logic, error handling
 - Integration tests: Real MCP server interaction scenarios
 - E2E test: Full workflow with actual vote creation → polling → completion
@@ -381,7 +386,7 @@ _End-to-end validation of real voting integration_
 ### Overall Phase 5.5 Acceptance Criteria
 
 - ✅ **Real MCP Integration**: `start_vote`, `get_vote_status`, `tally_vote` all working
-- ✅ **Live Polling**: Vote progress streams to frontend every 5 seconds  
+- ✅ **Live Polling**: Vote progress streams to frontend every 5 seconds
 - ✅ **Timeout Fallback**: Expires → pick index 0 with `fallback: true`
 - ✅ **PreparedTx Flow**: User confirms vote transaction via wallet
 - ✅ **Real Vote IDs**: Blockchain vote identifiers used throughout
