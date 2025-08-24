@@ -5,6 +5,11 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/interfaces/IERC721.sol";
 
+// Interface for HistorianMedals minting functionality
+interface IHistorianMedals {
+    function mint(address to, string calldata uri) external returns (uint256);
+}
+
 /**
  * @title DropManager
  * @dev Manages voting sessions for NFT drops and coordinates minting with HistorianMedals
@@ -240,18 +245,13 @@ contract DropManager is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Finalize mint after vote is closed (now accessible to any user)
+     * @dev Finalize vote and mint NFT to caller (now accessible to any user)
      */
     function finalizeMint(
         bytes32 voteId,
         string calldata winnerCid,
         string calldata tokenURI
-    )
-        external
-        voteExists(voteId)
-        voteClosed(voteId)
-        returns (uint256 tokenId)
-    {
+    ) external voteExists(voteId) voteClosed(voteId) returns (uint256 tokenId) {
         Vote storage vote = votes[voteId];
 
         // Verify winner CID matches
@@ -264,10 +264,11 @@ contract DropManager is Ownable, ReentrancyGuard {
         // Mark as finalized
         vote.finalized = true;
 
-        // This would typically call mint on the NFT contract
-        // For now, we'll just emit the event with a placeholder tokenId
-        // In a real implementation, you'd call: tokenId = nftContract.mint(tokenURI);
-        tokenId = uint256(voteId); // Placeholder
+        // Actually mint the NFT to the caller
+        tokenId = IHistorianMedals(address(historianMedals)).mint(
+            msg.sender,
+            tokenURI
+        );
 
         emit MintFinalized(voteId, tokenId, tokenURI);
     }

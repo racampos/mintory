@@ -266,8 +266,11 @@ router.post('/mint_final', async (req, res) => {
     
     const tx = createFinalizeMintTx(vote_id, winner_cid, metadataCid);
     
-    // Estimate gas
-    tx.gas = await estimateGas(tx);
+    // Estimate gas with higher limit for finalize mint operations (now includes NFT minting)
+    const estimatedGas = await estimateGas(tx);
+    tx.gas = Math.max(estimatedGas || 150000, 400000); // Ensure at least 400k gas for finalize+mint
+    
+    console.log(`🪙 MCP: Finalize mint gas estimated: ${estimatedGas} → using: ${tx.gas}`);
     
     // Validate PreparedTx
     const validatedTx = PreparedTxSchema.parse(tx);
