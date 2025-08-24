@@ -330,11 +330,11 @@ _Integrate real MCP start_vote + add vote transaction checkpoint_
 - **Test**: MCP `start_vote` returns real vote_id + valid PreparedTx
 - **Files**: `apps/backend/agents/vote.py`
 
-#### Phase 5.5.2: Vote Transaction Checkpoint Handler
+#### Phase 5.5.2: Vote Transaction Checkpoint Handler ✅ **COMPLETED**
 
 _Add workflow checkpoint for vote transaction confirmation_
 
-**📋 Tasks:**
+**✅ Implemented:**
 - Add `interrupt_after=["vote"]` to LangGraph workflow
 - Implement checkpoint resume handler for `vote_tx_approval`
 - Frontend integration: transaction confirmation → `/resume` with tx_hash

@@ -39,8 +39,8 @@ class CreateRunResponse(BaseModel):
 
 
 class ResumeRunRequest(BaseModel):
-    checkpoint: str  # "lore_approval" | "art_sanity" | "finalize_mint"
-    decision: str    # "approve" | "edit" | "proceed" | "regen" | "finalize"
+    checkpoint: str  # "lore_approval" | "vote_tx_approval" | "art_sanity" | "finalize_mint"  
+    decision: str    # "approve" | "edit" | "confirm" | "proceed" | "regen" | "finalize"
     payload: Dict[str, Any] = {}
 
 
@@ -98,7 +98,7 @@ def create_workflow(checkpointer) -> StateGraph:
     return workflow.compile(
         checkpointer=checkpointer,
         interrupt_before=["artist"],  # Interrupt after lore for approval
-        interrupt_after=["mint"]      # Interrupt after mint for finalize confirmation
+        interrupt_after=["vote", "mint"]  # Interrupt after vote for tx confirmation, after mint for finalize
     )
 
 
@@ -229,7 +229,7 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                     "run_id": run_id,
                     "state_update": {
                         key: current_state.get(key)
-                        for key in ["lore", "art", "vote", "mint", "checkpoint"]
+                        for key in ["lore", "art", "vote", "mint", "prepared_tx", "checkpoint"]
                         if current_state.get(key) is not None
                     }
                 }
@@ -305,7 +305,7 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                 state_changed = False
                 changed_keys = []
                 
-                for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]:
+                for key in ["lore", "art", "vote", "mint", "prepared_tx", "error", "checkpoint"]:
                     current_value = current_state.get(key)
                     last_value = last_state.get(key)
                     
@@ -322,7 +322,7 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                             "run_id": run_id,
                             "state_update": {
                                 key: current_state.get(key)
-                                for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]
+                                for key in ["lore", "art", "vote", "mint", "prepared_tx", "error", "checkpoint"]
                                 if current_state.get(key) is not None
                             }
                         }
@@ -333,7 +333,7 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                         # Update last_state with deep copy of non-message fields
                         last_state = {
                             key: current_state.get(key)
-                            for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]
+                            for key in ["lore", "art", "vote", "mint", "prepared_tx", "error", "checkpoint"]
                             if current_state.get(key) is not None
                         }
                         
@@ -417,6 +417,33 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
                 else:
                     # No instructions provided, just approve
                     current_state["checkpoint"] = None
+        
+        elif request.checkpoint == "vote_tx_approval":
+            if request.decision == "confirm":
+                # User confirmed the vote transaction - extract tx_hash from payload
+                tx_hash = request.payload.get("tx_hash", "")
+                if not tx_hash:
+                    raise HTTPException(status_code=400, detail="Transaction hash required for vote confirmation")
+                
+                # Add confirmation message with transaction hash
+                confirmation_message = {
+                    "agent": "Vote",
+                    "level": "success",
+                    "message": f"🗳️ Vote transaction confirmed - {tx_hash[:10]}...{tx_hash[-6:]}",
+                    "ts": str(uuid.uuid4()),
+                    "links": [{"label": "View Transaction", "href": f"https://explorer.shape.network/tx/{tx_hash}"}]
+                }
+                current_state.setdefault("messages", []).append(confirmation_message)
+                
+                # Store transaction hash in vote state for reference
+                if current_state.get("vote"):
+                    current_state["vote"]["tx_hash"] = tx_hash
+                
+                # Clear checkpoint to continue to tally_vote_agent
+                current_state["checkpoint"] = None
+                print(f"🗳️ VOTE: Transaction confirmed {tx_hash}, resuming to tally agent")
+            else:
+                raise HTTPException(status_code=400, detail="Invalid decision for vote_tx_approval. Expected 'confirm'.")
         
         elif request.checkpoint == "finalize_mint":
             if request.decision == "finalize":
