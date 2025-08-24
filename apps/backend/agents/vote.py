@@ -1,80 +1,109 @@
 """
-Vote Agent - Handle voting via MCP tools
+Vote Agent - Handle voting via MCP tools with real blockchain integration
 """
 import uuid
-import httpx
+import asyncio
 from typing import Dict, Any
 from state import RunState, VoteConfig, VoteState, VoteResult
+from services.mcp_client import get_mcp_client
 
 
 async def vote_agent(state: RunState) -> Dict[str, Any]:
     """
-    Vote Agent: Manage voting process via MCP tools
+    Vote Agent: Create blockchain vote via MCP integration
     
-    Input: ArtSet, VoteConfig
-    Output: VoteState with vote ID and eventual result
+    Input: ArtSet from artist_agent
+    Output: VoteState + PreparedTx + checkpoint for user confirmation
+    
+    Phase 5.5.1: Real MCP integration with vote_tx_approval checkpoint
     """
+    run_id = state.get("run_id", "unknown")
     art = state.get("art")
-    if not art:
+    
+    if not art or not art.get("cids"):
+        error_message = {
+            "agent": "Vote",
+            "level": "error",
+            "message": "No art data available for voting",
+            "ts": str(uuid.uuid4())
+        }
         return {
-            "error": "No art data available for voting",
-            "messages": [{
-                "agent": "Vote",
-                "level": "error",
-                "message": "Missing art data",
-                "ts": str(uuid.uuid4())
-            }]
+            "error": "No art data available for voting", 
+            "messages": [error_message]
         }
     
-    # Default vote config for demo
-    vote_config = VoteConfig(
-        method="simple",
-        gate="allowlist",  # Simplified for hackathon
-        duration_s=120  # 2 minutes
-    )
-    
     try:
-        # Small delay to allow SSE polling to detect intermediate state changes
-        import asyncio
-        await asyncio.sleep(0.05)  # 50ms delay for real-time streaming
+        # Small delay for SSE streaming
+        await asyncio.sleep(0.05)
         
-        # Call MCP server to start vote
-        # In production, this would call the actual MCP server
-        # For now, simulate the vote process
+        # Get MCP client for real blockchain integration
+        mcp_client = get_mcp_client()
         
-        vote_id = f"vote_{uuid.uuid4().hex[:8]}"
+        # Extract art CIDs for voting
+        art_cids = art["cids"]  # Real IPFS CIDs from artist agent
         
-        vote_state = VoteState(
-            id=vote_id,
-            config=vote_config,
-            result=None  # Will be populated when vote closes
+        # Vote configuration for hackathon demo
+        vote_config = VoteConfig(
+            method="simple",
+            gate="allowlist",  # Simplified allowlist for demo reliability
+            duration_s=120  # 2 minutes vote duration
         )
         
-        message = {
+        print(f"🗳️ VOTE: Starting real blockchain vote for {run_id}")
+        print(f"🗳️ VOTE: Art options: {len(art_cids)} CIDs")
+        print(f"🗳️ VOTE: Config: {vote_config.dict()}")
+        
+        # ✅ REAL MCP INTEGRATION: Call start_vote
+        vote_id, prepared_tx = await mcp_client.start_vote(art_cids, vote_config)
+        
+        print(f"🗳️ VOTE: Real vote created with ID: {vote_id}")
+        print(f"🗳️ VOTE: PreparedTx ready for wallet signing")
+        
+        # Create VoteState with real blockchain data
+        vote_state = VoteState(
+            id=vote_id,  # Real blockchain vote ID
+            config=vote_config,
+            result=None  # Will be populated by tally_vote_agent
+        )
+        
+        # Create success message with voting options
+        start_message = {
             "agent": "Vote",
-            "level": "info", 
-            "message": f"Started vote {vote_id} with {len(art['cids'])} options",
+            "level": "info",
+            "message": f"🗳️ Created blockchain vote {vote_id} with {len(art_cids)} options - Please confirm transaction",
             "ts": str(uuid.uuid4()),
             "links": [
                 {"label": f"Option {i+1}", "href": cid}
-                for i, cid in enumerate(art["cids"])
+                for i, cid in enumerate(art_cids)
             ]
         }
         
+        # ✅ CHECKPOINT: Add vote_tx_approval for user transaction confirmation
         return {
             "vote": vote_state.dict(),
-            "messages": [message]
+            "prepared_tx": {  # PreparedTx for frontend wallet signing
+                "to": prepared_tx.to,
+                "data": prepared_tx.data,
+                "value": prepared_tx.value if hasattr(prepared_tx, 'value') else "0x0",
+                "gas": prepared_tx.gas if hasattr(prepared_tx, 'gas') else None
+            },
+            "checkpoint": "vote_tx_approval",  # ✅ NEW CHECKPOINT
+            "messages": [start_message]
         }
         
     except Exception as e:
+        print(f"🗳️ VOTE: Failed to create vote: {e}")
+        
+        error_message = {
+            "agent": "Vote",
+            "level": "error",
+            "message": f"Vote creation failed: {str(e)}",
+            "ts": str(uuid.uuid4())
+        }
+        
         return {
             "error": f"Vote creation failed: {str(e)}",
-            "messages": [{
-                "agent": "Vote",
-                "level": "error",
-                "message": f"Vote creation failed: {str(e)}",
-                "ts": str(uuid.uuid4())
-            }]
+            "messages": [error_message]
         }
 
 
