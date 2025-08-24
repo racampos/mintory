@@ -21,7 +21,31 @@ export default function Home() {
   };
 
   const handleUpdate = (update: StreamUpdate) => {
-    setUpdates(prev => [...prev, update]);
+    setUpdates(prev => {
+      // Filter out empty messages (used for state-only updates)
+      if (!update.message.trim()) {
+        console.log(`🔄 State-only update (no UI message)`);
+        // Don't add to UI, but still process state_delta below
+        return prev;
+      }
+      
+      // Smart deduplication: Check if this exact message already exists
+      const isDuplicate = prev.some(existingUpdate => 
+        existingUpdate.agent === update.agent && 
+        existingUpdate.message === update.message &&
+        existingUpdate.level === update.level
+      );
+      
+      if (isDuplicate) {
+        console.log(`🚫 Deduped: ${update.agent} - "${update.message.slice(0, 50)}..."`);
+        return prev; // Don't add duplicate
+      }
+      
+      console.log(`✅ New: ${update.agent} - "${update.message.slice(0, 50)}..."`);
+      return [...prev, update];
+    });
+    
+    // Always process state_delta regardless of message deduplication
     if (update.state_delta) {
       setRunState(prev => prev ? { ...prev, ...update.state_delta } : null);
     }

@@ -70,8 +70,12 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
     }
 
     const connectToStream = () => {
+      // Include last message count to resume from where we left off
+      const lastMessageIndex = updates.length;
+      console.log(`🔗 SSE: Connecting with lastMessageIndex=${lastMessageIndex}`);
+      
       const es = new EventSource(
-        `/api/orchestrator/runs/${runState.run_id}/stream`
+        `/api/orchestrator/runs/${runState.run_id}/stream?last_message_index=${lastMessageIndex}`
       );
 
       // Handle different event types from the backend
@@ -99,14 +103,34 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
           
           // Update the run state with the new data
           if (stateData.state_update) {
-            const stateUpdate: StreamUpdate = {
-              agent: 'System',
-              level: 'info',
-              message: 'State updated',
-              state_delta: stateData.state_update,
-              timestamp: new Date().toISOString()
-            };
-            onUpdate(stateUpdate);
+            // Create a more descriptive state update message
+            const stateKeys = Object.keys(stateData.state_update).filter(key => key !== 'messages');
+            let message = 'State updated';
+            
+            if (stateKeys.length > 0) {
+              // Only show system message for meaningful state changes (not just message updates)
+              message = `State updated: ${stateKeys.join(', ')}`;
+              
+              const stateUpdate: StreamUpdate = {
+                agent: 'System',
+                level: 'info',
+                message: message,
+                state_delta: stateData.state_update,
+                timestamp: new Date().toISOString()
+              };
+              onUpdate(stateUpdate);
+            } else {
+              // If only messages changed, don't show a system notification
+              // Just pass the state_delta for internal state management
+              const stateUpdate: StreamUpdate = {
+                agent: 'System',
+                level: 'info',
+                message: '', // Empty message will be deduped/ignored by parent
+                state_delta: stateData.state_update,
+                timestamp: new Date().toISOString()
+              };
+              onUpdate(stateUpdate);
+            }
           }
         } catch (error) {
           console.error('Failed to parse state event:', error);
@@ -178,16 +202,19 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
       es.onerror = (error) => {
         console.error('EventSource connection error:', error);
         
-        // Only reconnect if the EventSource is still in a connecting/open state
-        // Don't reconnect if we explicitly closed it (completed/error workflows)
-        if (eventSource && es.readyState !== EventSource.CLOSED) {
-          console.log('Attempting to reconnect EventSource...');
-          // Implement exponential backoff reconnection
-          const delay = Math.min(1000 * Math.pow(2, 1), 10000); // Max 10s
+        // Disable automatic reconnection by closing the EventSource
+        es.close();
+        
+        // Only manually reconnect if we haven't explicitly closed it
+        if (eventSource && es.readyState === EventSource.CLOSED) {
+          console.log(`🔄 SSE: Manual reconnection with current message count: ${updates.length}`);
+          
+          // Implement exponential backoff reconnection with updated URL
+          const delay = Math.min(1000 * Math.pow(2, 1), 5000); // Max 5s delay
           
           reconnectTimeoutRef.current = setTimeout(() => {
-            if (eventSource && es.readyState === EventSource.CLOSED) {
-              connectToStream();
+            if (eventSource) {  // Make sure we're still supposed to be connected
+              connectToStream();  // This will use the current updates.length
             }
           }, delay);
         } else {

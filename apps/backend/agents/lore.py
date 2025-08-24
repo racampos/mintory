@@ -122,7 +122,7 @@ async def lore_agent(state: RunState) -> Dict[str, Any]:
         # Only return the success message since research message was already emitted immediately
         result = {
             "lore": lore_pack_dict,
-            "checkpoint": "lore_approval",
+            # "checkpoint": "lore_approval",  # Removed for automatic progression in development
             "messages": [success_message]  # research_message already emitted above
         }
         print(f"🧠 LORE: Returning {len(result['messages'])} additional messages: {[msg['agent'] for msg in result['messages']]}")
@@ -182,6 +182,6 @@ The significance of this date extends to broader themes of human progress, techn
         # Only return the error message since research message was already emitted immediately above
         return {
             "lore": fallback_lore_pack, 
-            "checkpoint": "lore_approval",
+            # "checkpoint": "lore_approval",  # Removed for automatic progression in development
             "messages": [error_message]  # research_message already emitted above
         }

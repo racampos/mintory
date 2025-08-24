@@ -129,7 +129,7 @@ async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
         
         return {
             "vote": updated_vote,
-            "checkpoint": "finalize_mint",
+            # "checkpoint": "finalize_mint",  # Removed for automatic progression in development
             "messages": [message]
         }
         

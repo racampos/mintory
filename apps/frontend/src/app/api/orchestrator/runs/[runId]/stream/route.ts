@@ -14,7 +14,10 @@ export async function GET(
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const backendUrl = `${BACKEND_BASE_URL}/runs/${runId}/stream`;
+        // Forward query parameters from the frontend request to the backend
+        const { searchParams } = new URL(request.url);
+        const queryString = searchParams.toString();
+        const backendUrl = `${BACKEND_BASE_URL}/runs/${runId}/stream${queryString ? `?${queryString}` : ''}`;
         console.log(`[Orchestrator SSE Proxy] Fetching ${backendUrl}`);
         
         const response = await fetch(backendUrl, {

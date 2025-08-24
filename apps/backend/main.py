@@ -183,7 +183,7 @@ async def get_run(run_id: str) -> Dict[str, Any]:
 
 
 @app.get("/runs/{run_id}/stream")
-async def stream_run(run_id: str):
+async def stream_run(run_id: str, last_message_index: int = 0):
     """Stream run updates via SSE"""
     
     async def event_generator() -> AsyncGenerator[str, None]:
@@ -198,13 +198,16 @@ async def stream_run(run_id: str):
                 yield f"data: {json.dumps(error_data)}\n\n"
                 return
             
-            # If workflow is already complete, send all messages first, then completion
+            # If workflow is already complete, send only unseen messages, then completion
             if current_state.get("mint") and not current_state.get("error"):
-                print(f"Run {run_id} already completed, sending all messages then completion event")
+                print(f"Run {run_id} already completed, sending messages from index {last_message_index} then completion event")
                 
-                # Send all agent messages
+                # Send only unseen agent messages
                 messages = current_state.get("messages", [])
-                for message in messages:
+                unseen_messages = messages[last_message_index:] if last_message_index < len(messages) else []
+                print(f"Sending {len(unseen_messages)} unseen messages out of {len(messages)} total")
+                
+                for message in unseen_messages:
                     yield f"event: update\n"
                     yield f"data: {json.dumps(message)}\n\n"
                     await asyncio.sleep(0.1)  # Small delay for better UX
@@ -228,13 +231,16 @@ async def stream_run(run_id: str):
                 yield f"data: {json.dumps(completion_data)}\n\n"
                 return
             
-            # If workflow has error, send messages first, then error
+            # If workflow has error, send only unseen messages, then error
             if current_state.get("error"):
-                print(f"Run {run_id} has error, sending messages then error event")
+                print(f"Run {run_id} has error, sending messages from index {last_message_index} then error event")
                 
-                # Send any messages that were generated before error
+                # Send only unseen messages that were generated before error
                 messages = current_state.get("messages", [])
-                for message in messages:
+                unseen_messages = messages[last_message_index:] if last_message_index < len(messages) else []
+                print(f"Sending {len(unseen_messages)} unseen messages out of {len(messages)} total before error")
+                
+                for message in unseen_messages:
                     yield f"event: update\n"
                     yield f"data: {json.dumps(message)}\n\n"
                     await asyncio.sleep(0.1)
@@ -245,12 +251,12 @@ async def stream_run(run_id: str):
                 yield f"data: {json.dumps(error_data)}\n\n"
                 return
             
-            print(f"Starting live stream monitoring for run {run_id}")
-            last_message_count = 0
+            print(f"Starting live stream monitoring for run {run_id}, resuming from message index {last_message_index}")
+            last_message_count = last_message_index  # Resume from where client left off
             last_state = {}
             
             # Poll for state changes and stream them
-            for poll_count in range(300):  # 5 minutes max
+            for poll_count in range(600):  # 10 minutes max (enough for image generation)
                 try:
                     current_state = simple_state.get_run_state(run_id)
                     print(f"SSE Poll #{poll_count} for {run_id}: {len(current_state.get('messages', []))} messages, keys: {list(current_state.keys())}")
@@ -262,31 +268,42 @@ async def stream_run(run_id: str):
                     print(f"Error during SSE poll #{poll_count} for {run_id}: {poll_error}")
                     raise
                 
-                # Check for new messages
+                # Check for new messages ONLY - this is the most important check
                 messages = current_state.get("messages", [])
-                if len(messages) > last_message_count:
-                    print(f"New messages detected: {len(messages)} vs {last_message_count}")
+                current_message_count = len(messages)
+                
+                if current_message_count > last_message_count:
+                    print(f"📡 SSE: New messages detected: {current_message_count} vs {last_message_count}")
                     try:
-                        for new_message in messages[last_message_count:]:
-                            print(f"Streaming message: {new_message.get('agent')} - {new_message.get('message', '')[:50]}")
+                        # Only send the NEW messages, not all messages
+                        new_messages = messages[last_message_count:]
+                        for new_message in new_messages:
+                            print(f"📡 SSE: Streaming NEW message: {new_message.get('agent')} - {new_message.get('message', '')[:50]}")
                             yield f"event: update\n"
                             yield f"data: {json.dumps(new_message)}\n\n"
-                            print(f"Successfully streamed message from {new_message.get('agent')}")
-                        last_message_count = len(messages)
-                        print(f"Updated last_message_count to {last_message_count}")
+                        
+                        last_message_count = current_message_count
+                        print(f"📡 SSE: Updated last_message_count to {last_message_count}")
                     except Exception as stream_error:
                         print(f"Error streaming messages for {run_id}: {stream_error}")
                         raise
                 
-                # Check for significant state changes
+                # Check for ACTUAL state changes in non-message fields
+                # Use deep comparison for the important state keys
                 state_changed = False
+                changed_keys = []
+                
                 for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]:
-                    if current_state.get(key) != last_state.get(key):
+                    current_value = current_state.get(key)
+                    last_value = last_state.get(key)
+                    
+                    # Deep comparison for these state keys
+                    if json.dumps(current_value, sort_keys=True, default=str) != json.dumps(last_value, sort_keys=True, default=str):
                         state_changed = True
-                        break
+                        changed_keys.append(key)
                 
                 if state_changed:
-                    print(f"State changed for {run_id}, sending state update")
+                    print(f"📡 SSE: ACTUAL state change detected for {run_id}: {changed_keys}")
                     try:
                         # Send state update
                         state_update = {
@@ -299,11 +316,21 @@ async def stream_run(run_id: str):
                         }
                         yield f"event: state\n"
                         yield f"data: {json.dumps(state_update)}\n\n"
-                        print(f"Successfully sent state update for {run_id}")
-                        last_state = current_state.copy()
+                        print(f"📡 SSE: Successfully sent state update for {run_id}")
+                        
+                        # Update last_state with deep copy of non-message fields
+                        last_state = {
+                            key: current_state.get(key)
+                            for key in ["lore", "art", "vote", "mint", "error", "checkpoint"]
+                            if current_state.get(key) is not None
+                        }
+                        
                     except Exception as state_error:
                         print(f"Error sending state update for {run_id}: {state_error}")
                         raise
+                else:
+                    if poll_count % 500 == 0:  # Log every 500 polls (~5s) to reduce noise
+                        print(f"📡 SSE: No state changes detected for {run_id} (poll #{poll_count})")
                 
                 # Check if workflow is complete
                 if current_state.get("mint") and not current_state.get("error"):
@@ -326,7 +353,7 @@ async def stream_run(run_id: str):
                     yield f"data: {json.dumps(error_data)}\n\n"
                     break
                 
-                await asyncio.sleep(0.01)  # Poll every 10ms for ultra-fast real-time streaming
+                await asyncio.sleep(1)  # Poll every second
             
             # If we exit the poll loop without completion/error
             print(f"SSE polling loop ended for {run_id} (max iterations reached or other reason)")
