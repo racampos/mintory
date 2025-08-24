@@ -4,8 +4,8 @@ import { join } from 'path';
 
 config();
 
-// Load addresses from deployment
-const addressesPath = join(process.cwd(), '../../infra/deploy/addresses.json');
+// Load addresses from local deployment file (Railway-compatible)
+const addressesPath = join(process.cwd(), 'addresses.json');
 export const ADDRESSES = JSON.parse(readFileSync(addressesPath, 'utf-8')) as {
   chainId: number;
   DropManager: string;
