@@ -311,6 +311,109 @@ async def pin_thumbnail_to_ipfs_mcp(thumbnail_data: bytes, filename: str, run_id
         return None
 
 
+def pin_image_to_ipfs_sync(image_path: pathlib.Path, run_id: str) -> Optional[str]:
+    """
+    Pin image file to IPFS using synchronous requests (no asyncio).
+    
+    Args:
+        image_path: Path to image file
+        run_id: Run ID for logging
+        
+    Returns:
+        IPFS CID or None if pinning fails
+    """
+    try:
+        # Check if image needs compression
+        size_mb = image_path.stat().st_size / (1024 * 1024)
+        
+        if size_mb <= 2.0:
+            # Image is already under limit, use original file
+            print(f"    📎 Using original image ({size_mb:.2f}MB)")
+            with open(image_path, 'rb') as f:
+                file_data = f.read()
+            content_type = "image/png"
+        else:
+            # Image is too large, compress it
+            print(f"    🗜️ Compressing large image ({size_mb:.1f}MB > 2MB)")
+            file_data = compress_image_for_ipfs(image_path, max_size_mb=2.0)
+            if not file_data:
+                print(f"    ⚠️ Image compression failed: {image_path}")
+                return None
+            content_type = "image/jpeg"
+        
+        # Try direct Pinata API first
+        pinata_jwt = os.getenv("PINATA_JWT")
+        if pinata_jwt:
+            url = "https://api.pinata.cloud/pinning/pinFileToIPFS"
+            headers = {"Authorization": f"Bearer {pinata_jwt}"}
+            files = {"file": (image_path.name, file_data, content_type)}
+            
+            print(f"    📎 Pinning {image_path.name} directly to Pinata ({len(file_data)/1024:.0f}KB)...")
+            response = requests.post(url, files=files, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                ipfs_hash = response.json()['IpfsHash']
+                print(f"    ✅ Pinned directly to IPFS: ipfs://{ipfs_hash}")
+                return ipfs_hash
+            else:
+                print(f"    ⚠️ Pinata API error {response.status_code}: {response.text}")
+        
+        # Fallback: return None for now (MCP server sync would need more work)
+        print(f"    ⚠️ No PINATA_JWT configured, skipping IPFS pinning")
+        return None
+        
+    except Exception as e:
+        print(f"    ⚠️ Sync IPFS pinning failed for {image_path}: {e}")
+        return None
+
+
+def pin_thumbnail_to_ipfs_sync(thumbnail_data: bytes, filename: str, run_id: str) -> Optional[str]:
+    """
+    Pin thumbnail data to IPFS using synchronous requests (no asyncio).
+    
+    Args:
+        thumbnail_data: Thumbnail image bytes
+        filename: Original filename for logging
+        run_id: Run ID for logging
+        
+    Returns:
+        IPFS CID or None if pinning fails
+    """
+    try:
+        # Validate thumbnail size
+        size_kb = len(thumbnail_data) / 1024
+        if size_kb > 200:
+            print(f"    ⚠️ Thumbnail too large ({size_kb:.1f}KB > 200KB): {filename}")
+            return None
+        
+        # Try direct Pinata API first
+        pinata_jwt = os.getenv("PINATA_JWT")
+        if pinata_jwt:
+            url = "https://api.pinata.cloud/pinning/pinFileToIPFS"
+            headers = {"Authorization": f"Bearer {pinata_jwt}"}
+            
+            thumbnail_filename = f"thumb_{filename.replace('.png', '.jpg')}"
+            files = {"file": (thumbnail_filename, BytesIO(thumbnail_data), "image/jpeg")}
+            
+            print(f"    📎 Pinning thumbnail {thumbnail_filename} directly to Pinata ({size_kb:.0f}KB)...")
+            response = requests.post(url, files=files, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                ipfs_hash = response.json()['IpfsHash']
+                print(f"    ✅ Thumbnail pinned directly to IPFS: ipfs://{ipfs_hash}")
+                return ipfs_hash
+            else:
+                print(f"    ⚠️ Pinata thumbnail API error {response.status_code}: {response.text}")
+        
+        # Fallback: return None for now
+        print(f"    ⚠️ No PINATA_JWT configured, skipping thumbnail IPFS pinning")
+        return None
+        
+    except Exception as e:
+        print(f"    ⚠️ Sync thumbnail IPFS pinning failed for {filename}: {e}")
+        return None
+
+
 def generate_image_openai(prompt: str, filename: str, size: str = "1536x1024") -> str:
     """Generate image using OpenAI gpt-image-1 model."""
     oa = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -369,7 +472,7 @@ def create_image_prompts(prompt_seed: Dict[str, Any], date_label: str) -> List[s
     return prompts
 
 
-async def artist_agent(state: RunState) -> Dict[str, Any]:
+def artist_agent(state: RunState) -> Dict[str, Any]:
     """
     Artist Agent: Generate art based on LorePack using OpenAI gpt-image-1 with IPFS integration
     
@@ -386,15 +489,20 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
     date_label = state.get("date_label", "Unknown Event")
     lore = state.get("lore")
     
+    # Collect all messages to return to workflow (initialize early)
+    all_messages = []
+    
     if not lore:
+        error_message = {
+            "agent": "Artist",
+            "level": "error", 
+            "message": "Missing lore data",
+            "ts": str(uuid.uuid4())
+        }
+        all_messages.append(error_message)
         return {
             "error": "No lore data available for art generation",
-            "messages": [{
-                "agent": "Artist",
-                "level": "error", 
-                "message": "Missing lore data",
-                "ts": str(uuid.uuid4())
-            }]
+            "messages": all_messages
         }
     
     # Small delay to allow SSE polling to detect intermediate state changes
@@ -404,22 +512,24 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
     print(f"🎨 ARTIST: Starting image generation for {run_id} - {date_label}")
     print(f"🎨 ARTIST: Using prompt_seed: {prompt_seed}")
     
-    # Emit initial Artist message by adding to existing messages
+    # Emit initial Artist message
     start_message = {
         "agent": "Artist",
         "level": "info",
-        "message": f"🎨 Artist agent activated - preparing to generate 4 artworks for {date_label}",
+        "message": f"🎨 Artist agent activated - preparing to generate artworks for {date_label}",
         "ts": str(uuid.uuid4())
     }
+    all_messages.append(start_message)
+    print(f"🎨 ARTIST: Created start message")
     
-    # Add start message to existing state (not replacing)
+    # Emit start message immediately to simple_state for real-time SSE streaming
     if run_id:
         import simple_state
         current_state = simple_state.get_run_state(run_id) or {}
         current_messages = current_state.get("messages", [])
         current_messages.append(start_message)
         simple_state.update_run_state(run_id, {"messages": current_messages})
-        print(f"🎨 ARTIST: Added start message, total messages: {len(current_messages)}")
+        print(f"🎨 ARTIST: Added start message to state, total messages: {len(current_messages)}")
     
     # Create temp directory for generated images
     temp_dir = pathlib.Path("temp_images") / run_id
@@ -439,22 +549,23 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
             filename = temp_dir / f"art_{i+1}.png"
             print(f"🎨 ARTIST: Generating image {i+1}/4: {prompt[:100]}...")
             
-            # Create and emit progress message individually
+            # Create progress message
             progress_message = {
                 "agent": "Artist",
                 "level": "info", 
-                "message": f"Generating image {i+1}/4 using OpenAI gpt-image-1...",
+                "message": f"Generating image {i+1}/{len(prompts)} using OpenAI gpt-image-1...",
                 "ts": str(uuid.uuid4())
             }
+            all_messages.append(progress_message)
+            print(f"🎨 ARTIST: Added progress message {i+1}/{len(prompts)}")
             
-            # Emit progress by adding to existing state (not replacing)
+            # Emit progress message immediately to simple_state for real-time SSE streaming
             if run_id:
-                import simple_state
                 current_state = simple_state.get_run_state(run_id) or {}
                 current_messages = current_state.get("messages", [])
                 current_messages.append(progress_message)
                 simple_state.update_run_state(run_id, {"messages": current_messages})
-                print(f"🎨 ARTIST: Added progress message {i+1}/4, total messages: {len(current_messages)}")
+                print(f"🎨 ARTIST: Added progress message {i+1}/{len(prompts)} to state, total messages: {len(current_messages)}")
             
             try:
                 # Generate image
@@ -470,13 +581,13 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
                 if not thumbnail_data:
                     raise Exception("Thumbnail creation failed")
                 
-                # Pin image to IPFS (using direct Pinata API)
-                image_cid = await pin_image_to_ipfs_direct(filepath_obj, run_id)
+                # Pin image to IPFS (using synchronous Pinata API)
+                image_cid = pin_image_to_ipfs_sync(filepath_obj, run_id)
                 if not image_cid:
                     raise Exception("Image IPFS pinning failed")
                 
-                # Pin thumbnail to IPFS (using direct Pinata API)
-                thumbnail_cid = await pin_thumbnail_to_ipfs_direct(thumbnail_data, f"art_{i+1}.png", run_id)
+                # Pin thumbnail to IPFS (using synchronous Pinata API)
+                thumbnail_cid = pin_thumbnail_to_ipfs_sync(thumbnail_data, f"art_{i+1}.png", run_id)
                 if not thumbnail_cid:
                     raise Exception("Thumbnail IPFS pinning failed")
                 
@@ -489,21 +600,23 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
                 motif = motifs[i] if i < len(motifs) else f"variation {i+1}"
                 style_notes.append(f"Historical artwork featuring {motif} in {prompt_seed.get('style', 'classic')} style")
                 
-                # Create and emit completion message individually
+                # Create completion message
                 completion_message = {
                     "agent": "Artist",
                     "level": "success",
-                    "message": f"Image {i+1}/4 generated and pinned to IPFS ({os.path.getsize(filepath)/1024/1024:.1f}MB → ipfs://{image_cid})",
+                    "message": f"Image {i+1}/{len(prompts)} generated and pinned to IPFS ({os.path.getsize(filepath)/1024/1024:.1f}MB → ipfs://{image_cid})",
                     "ts": str(uuid.uuid4())
                 }
+                all_messages.append(completion_message)
+                print(f"🎨 ARTIST: Added completion message {i+1}/{len(prompts)}")
                 
-                # Emit completion by adding to existing state (not replacing)
+                # Emit completion message immediately to simple_state for real-time SSE streaming
                 if run_id:
                     current_state = simple_state.get_run_state(run_id) or {}
                     current_messages = current_state.get("messages", [])
                     current_messages.append(completion_message)
                     simple_state.update_run_state(run_id, {"messages": current_messages})
-                    print(f"🎨 ARTIST: Added completion message {i+1}/4, total messages: {len(current_messages)}")
+                    print(f"🎨 ARTIST: Added completion message {i+1}/{len(prompts)} to state, total messages: {len(current_messages)}")
                 
             except Exception as e:
                 print(f"🎨 ARTIST: Failed to generate or pin image {i+1}: {e}")
@@ -512,21 +625,23 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
                 thumbnail_cids.append(f"ipfs://placeholder_thumb_{i+1}")
                 style_notes.append(f"Image generation or IPFS pinning failed for variation {i+1}")
                 
-                # Create and emit error message individually
+                # Create error message
                 error_message = {
                     "agent": "Artist",
                     "level": "warning",
-                    "message": f"Image {i+1}/4 generation/pinning failed: {str(e)[:50]}",
+                    "message": f"Image {i+1}/{len(prompts)} generation/pinning failed: {str(e)[:50]}",
                     "ts": str(uuid.uuid4())
                 }
+                all_messages.append(error_message)
+                print(f"🎨 ARTIST: Added error message {i+1}/{len(prompts)}")
                 
-                # Emit error by adding to existing state (not replacing)
+                # Emit error message immediately to simple_state for real-time SSE streaming
                 if run_id:
                     current_state = simple_state.get_run_state(run_id) or {}
                     current_messages = current_state.get("messages", [])
                     current_messages.append(error_message)
                     simple_state.update_run_state(run_id, {"messages": current_messages})
-                    print(f"🎨 ARTIST: Added error message {i+1}/4, total messages: {len(current_messages)}")
+                    print(f"🎨 ARTIST: Added error message {i+1}/{len(prompts)} to state, total messages: {len(current_messages)}")
         
         # Create art set with IPFS CIDs
         art_set = {
@@ -549,8 +664,9 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
                 for i, cid in enumerate(generated_cids)
             ]
         }
+        all_messages.append(final_message)
         
-        # Add final message and art set to existing state (not replacing)
+        # Emit final message immediately to simple_state for real-time SSE streaming
         if run_id:
             current_state = simple_state.get_run_state(run_id) or {}
             current_messages = current_state.get("messages", [])
@@ -561,10 +677,7 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
                 "messages": current_messages,
                 "art": art_set  # Include the art set in the state update
             })
-            print(f"🎨 ARTIST: Added final message + art set, total messages: {len(current_messages)}")
-        
-        # For backward compatibility, still return the final message
-        message = final_message
+            print(f"🎨 ARTIST: Added final message to state, total messages: {len(current_messages)}")
         
         print(f"🎨 ARTIST: Successfully generated {successful_gens}/{len(prompts)} images")
         
@@ -593,17 +706,31 @@ async def artist_agent(state: RunState) -> Dict[str, Any]:
             ]
         }
         
-        message = {
+        error_message = {
             "agent": "Artist",
             "level": "warning",
             "message": f"Image generation failed, using fallback placeholders: {str(e)[:100]}",
             "ts": str(uuid.uuid4()),
             "links": []
         }
+        all_messages.append(error_message)
+        
+        # Emit fallback error message immediately to simple_state for real-time SSE streaming
+        if run_id:
+            current_state = simple_state.get_run_state(run_id) or {}
+            current_messages = current_state.get("messages", [])
+            current_messages.append(error_message)
+            
+            # Update state with error message and fallback art set
+            simple_state.update_run_state(run_id, {
+                "messages": current_messages,
+                "art": art_set  # Include the fallback art set in the state update
+            })
+            print(f"🎨 ARTIST: Added fallback error message to state, total messages: {len(current_messages)}")
     
     result = {
         "art": art_set,
-        "messages": [message]
+        "messages": all_messages  # Return ALL collected messages to workflow
     }
     print(f"🎨 ARTIST: Returning {len(result['messages'])} messages: {[msg['agent'] for msg in result['messages']]}")
     return result
