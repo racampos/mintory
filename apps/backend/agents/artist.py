@@ -1,14 +1,19 @@
 """
-Artist Agent - Image generation using OpenAI gpt-image-1 and local storage
+Artist Agent - Image generation using OpenAI gpt-image-1 with IPFS integration
 """
 import os
 import time
 import uuid
 import base64
 import pathlib
-from typing import Dict, Any, List
+import asyncio
+from typing import Dict, Any, List, Optional
 from openai import OpenAI
+from PIL import Image
+from io import BytesIO
 from state import RunState, ArtSet
+from services.mcp_client import get_mcp_client
+import requests
 
 
 def write_b64_image(path: pathlib.Path, b64: str) -> None:
@@ -16,6 +21,294 @@ def write_b64_image(path: pathlib.Path, b64: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, 'wb') as f:
         f.write(base64.b64decode(b64))
+
+
+def validate_image_size(filepath: pathlib.Path, max_size_mb: float = 2.0) -> bool:
+    """Validate that image file is under size limit."""
+    if not filepath.exists():
+        return False
+    size_mb = filepath.stat().st_size / (1024 * 1024)
+    return size_mb <= max_size_mb
+
+
+def create_thumbnail(image_path: pathlib.Path, max_size_kb: float = 200.0) -> Optional[bytes]:
+    """
+    Create thumbnail from image file with size validation.
+    
+    Args:
+        image_path: Path to source image
+        max_size_kb: Maximum thumbnail size in KB
+        
+    Returns:
+        Thumbnail bytes or None if creation fails
+    """
+    try:
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary (for PNG with transparency, etc.)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Start with reasonable thumbnail size
+            thumbnail_size = (400, 400)
+            img.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+            
+            # Try different quality settings to get under size limit
+            for quality in [85, 70, 55, 40, 25]:
+                buffer = BytesIO()
+                img.save(buffer, format='JPEG', quality=quality, optimize=True)
+                buffer_size_kb = len(buffer.getvalue()) / 1024
+                
+                if buffer_size_kb <= max_size_kb:
+                    return buffer.getvalue()
+            
+            # If still too large, try smaller dimensions
+            for size in [(300, 300), (200, 200), (150, 150)]:
+                img_copy = img.copy()
+                img_copy.thumbnail(size, Image.Resampling.LANCZOS)
+                buffer = BytesIO()
+                img_copy.save(buffer, format='JPEG', quality=40, optimize=True)
+                buffer_size_kb = len(buffer.getvalue()) / 1024
+                
+                if buffer_size_kb <= max_size_kb:
+                    return buffer.getvalue()
+                    
+            print(f"    ⚠️ Could not create thumbnail under {max_size_kb}KB for {image_path}")
+            return None
+            
+    except Exception as e:
+        print(f"    ⚠️ Thumbnail creation failed for {image_path}: {e}")
+        return None
+
+
+def compress_image_for_ipfs(image_path: pathlib.Path, max_size_mb: float = 2.0) -> Optional[bytes]:
+    """
+    Compress image to meet IPFS size requirements.
+    
+    Args:
+        image_path: Path to source image
+        max_size_mb: Maximum size in MB
+        
+    Returns:
+        Compressed image bytes or None if compression fails
+    """
+    try:
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            max_size_bytes = max_size_mb * 1024 * 1024
+            
+            # Try different compression strategies
+            strategies = [
+                # First try: reduce quality but keep size
+                {'format': 'JPEG', 'quality': 85, 'optimize': True},
+                {'format': 'JPEG', 'quality': 70, 'optimize': True},
+                {'format': 'JPEG', 'quality': 55, 'optimize': True},
+                
+                # Then try: resize image dimensions
+                {'format': 'JPEG', 'quality': 85, 'optimize': True, 'resize': (1200, 800)},
+                {'format': 'JPEG', 'quality': 70, 'optimize': True, 'resize': (1000, 667)},
+                {'format': 'JPEG', 'quality': 55, 'optimize': True, 'resize': (800, 533)},
+            ]
+            
+            for strategy in strategies:
+                img_copy = img.copy()
+                
+                # Apply resizing if specified
+                if 'resize' in strategy:
+                    img_copy.thumbnail(strategy['resize'], Image.Resampling.LANCZOS)
+                
+                buffer = BytesIO()
+                img_copy.save(
+                    buffer, 
+                    format=strategy['format'],
+                    quality=strategy['quality'],
+                    optimize=strategy.get('optimize', False)
+                )
+                
+                compressed_data = buffer.getvalue()
+                size_mb = len(compressed_data) / (1024 * 1024)
+                
+                if len(compressed_data) <= max_size_bytes:
+                    print(f"    ✅ Compressed {image_path.name}: {size_mb:.2f}MB (quality={strategy['quality']})")
+                    return compressed_data
+            
+            print(f"    ⚠️ Could not compress {image_path.name} under {max_size_mb}MB")
+            return None
+            
+    except Exception as e:
+        print(f"    ⚠️ Image compression failed for {image_path}: {e}")
+        return None
+
+
+async def pin_image_to_ipfs_direct(image_path: pathlib.Path, run_id: str) -> Optional[str]:
+    """
+    Pin image file to IPFS using direct Pinata API (bypasses MCP server FormData issue).
+    
+    Args:
+        image_path: Path to image file
+        run_id: Run ID for logging
+        
+    Returns:
+        IPFS CID or None if pinning fails
+    """
+    try:
+        # Check if image needs compression
+        size_mb = image_path.stat().st_size / (1024 * 1024)
+        
+        if size_mb <= 2.0:
+            # Image is already under limit, use original file
+            print(f"    📎 Using original image ({size_mb:.2f}MB)")
+            file_data = None  # Will read from file directly
+        else:
+            # Image is too large, compress it
+            print(f"    🗜️ Compressing large image ({size_mb:.1f}MB > 2MB)")
+            file_data = compress_image_for_ipfs(image_path, max_size_mb=2.0)
+            if not file_data:
+                print(f"    ⚠️ Image compression failed: {image_path}")
+                return None
+        
+        # Pin directly to Pinata API (workaround for MCP server FormData issue)
+        pinata_jwt = os.getenv("PINATA_JWT")
+        if not pinata_jwt:
+            print(f"    ⚠️ PINATA_JWT not configured - falling back to MCP server")
+            return await pin_image_to_ipfs_mcp(image_path, run_id, file_data)
+        
+        url = "https://api.pinata.cloud/pinning/pinFileToIPFS"
+        headers = {"Authorization": f"Bearer {pinata_jwt}"}
+        
+        print(f"    📎 Pinning {image_path.name} directly to Pinata...")
+        
+        if file_data:
+            # Use compressed data
+            files = {"file": (image_path.name, BytesIO(file_data), "image/jpeg")}
+            print(f"    📦 Uploading compressed data ({len(file_data)/1024:.0f}KB)")
+            response = requests.post(url, files=files, headers=headers)
+        else:
+            # Use original file
+            with open(image_path, 'rb') as f:
+                files = {"file": (image_path.name, f, "image/png")}
+                response = requests.post(url, files=files, headers=headers)
+        
+        if response.status_code != 200:
+            print(f"    ⚠️ Pinata API error {response.status_code}: {response.text}")
+            return None
+        
+        ipfs_hash = response.json()['IpfsHash']
+        print(f"    ✅ Pinned directly to IPFS: ipfs://{ipfs_hash}")
+        return ipfs_hash
+        
+    except Exception as e:
+        print(f"    ⚠️ Direct IPFS pinning failed for {image_path}: {e}")
+        # Fallback to MCP server attempt
+        return await pin_image_to_ipfs_mcp(image_path, run_id, None)
+
+
+async def pin_image_to_ipfs_mcp(image_path: pathlib.Path, run_id: str, compressed_data: Optional[bytes] = None) -> Optional[str]:
+    """
+    Pin image file to IPFS using MCP client (fallback method).
+    
+    Args:
+        image_path: Path to image file  
+        run_id: Run ID for logging
+        compressed_data: Pre-compressed image data, or None to use file
+        
+    Returns:
+        IPFS CID or None if pinning fails
+    """
+    try:
+        if compressed_data:
+            image_data = compressed_data
+        else:
+            with open(image_path, 'rb') as f:
+                image_data = f.read()
+        
+        # Pin to IPFS via MCP
+        mcp_client = get_mcp_client()
+        print(f"    📎 Pinning {image_path.name} to IPFS via MCP ({len(image_data)/1024:.0f}KB)...")
+        result = await mcp_client.pin_cid(image_data, content_type="image/jpeg")
+        
+        print(f"    ✅ Pinned to IPFS via MCP: ipfs://{result.cid}")
+        return result.cid
+        
+    except Exception as e:
+        print(f"    ⚠️ MCP IPFS pinning failed for {image_path}: {e}")
+        return None
+
+
+async def pin_thumbnail_to_ipfs_direct(thumbnail_data: bytes, filename: str, run_id: str) -> Optional[str]:
+    """
+    Pin thumbnail data to IPFS using direct Pinata API (preferred method).
+    
+    Args:
+        thumbnail_data: Thumbnail image bytes
+        filename: Original filename for logging
+        run_id: Run ID for logging
+        
+    Returns:
+        IPFS CID or None if pinning fails
+    """
+    try:
+        # Validate thumbnail size
+        size_kb = len(thumbnail_data) / 1024
+        if size_kb > 200:
+            print(f"    ⚠️ Thumbnail too large ({size_kb:.1f}KB > 200KB): {filename}")
+            return None
+        
+        # Try direct Pinata API first
+        pinata_jwt = os.getenv("PINATA_JWT")
+        if pinata_jwt:
+            url = "https://api.pinata.cloud/pinning/pinFileToIPFS"
+            headers = {"Authorization": f"Bearer {pinata_jwt}"}
+            
+            thumbnail_filename = f"thumb_{filename.replace('.png', '.jpg')}"
+            files = {"file": (thumbnail_filename, BytesIO(thumbnail_data), "image/jpeg")}
+            
+            print(f"    📎 Pinning thumbnail {thumbnail_filename} directly to Pinata ({size_kb:.0f}KB)...")
+            response = requests.post(url, files=files, headers=headers)
+            
+            if response.status_code == 200:
+                ipfs_hash = response.json()['IpfsHash']
+                print(f"    ✅ Thumbnail pinned directly to IPFS: ipfs://{ipfs_hash}")
+                return ipfs_hash
+            else:
+                print(f"    ⚠️ Pinata thumbnail API error {response.status_code}: {response.text}")
+        
+        # Fallback to MCP server
+        print(f"    🔄 Falling back to MCP server for thumbnail...")
+        return await pin_thumbnail_to_ipfs_mcp(thumbnail_data, filename, run_id)
+        
+    except Exception as e:
+        print(f"    ⚠️ Direct thumbnail IPFS pinning failed for {filename}: {e}")
+        # Fallback to MCP server
+        return await pin_thumbnail_to_ipfs_mcp(thumbnail_data, filename, run_id)
+
+
+async def pin_thumbnail_to_ipfs_mcp(thumbnail_data: bytes, filename: str, run_id: str) -> Optional[str]:
+    """
+    Pin thumbnail data to IPFS using MCP client (fallback method).
+    
+    Args:
+        thumbnail_data: Thumbnail image bytes
+        filename: Original filename for logging
+        run_id: Run ID for logging
+        
+    Returns:
+        IPFS CID or None if pinning fails
+    """
+    try:
+        # Pin to IPFS via MCP
+        mcp_client = get_mcp_client()
+        print(f"    📎 Pinning thumbnail {filename} to IPFS via MCP ({len(thumbnail_data)/1024:.0f}KB)...")
+        result = await mcp_client.pin_cid(thumbnail_data, content_type="image/jpeg")
+        
+        print(f"    ✅ Thumbnail pinned to IPFS via MCP: ipfs://{result.cid}")
+        return result.cid
+        
+    except Exception as e:
+        print(f"    ⚠️ MCP thumbnail IPFS pinning failed for {filename}: {e}")
+        return None
 
 
 def generate_image_openai(prompt: str, filename: str, size: str = "1536x1024") -> str:
@@ -49,31 +342,45 @@ def generate_image_openai(prompt: str, filename: str, size: str = "1536x1024") -
 
 
 def create_image_prompts(prompt_seed: Dict[str, Any], date_label: str) -> List[str]:
-    """Create varied image prompts based on the prompt_seed."""
+    """Create varied image prompts based on the prompt_seed motifs."""
     style = prompt_seed.get("style", "historical, documentary")
     palette = prompt_seed.get("palette", "warm, classic colors")
-    motifs = prompt_seed.get("motifs", ["vintage elements", "historical artifacts"])
+    motifs = prompt_seed.get("motifs", ["vintage elements", "historical artifacts", "timeless designs", "classical composition"])
     negative = prompt_seed.get("negative", "modern, futuristic")
     
-    # Create 4 varied prompts based on the prompt_seed
+    # Create prompts based on the number of motifs provided
     base_prompt = f"Historical artwork depicting {date_label}, {style}, {palette}"
     
-    prompts = [
-        f"{base_prompt}, featuring {motifs[0] if motifs else 'historical elements'}, avoid {negative}",
-        f"{base_prompt}, with {motifs[1] if len(motifs) > 1 else 'traditional patterns'}, not {negative}",
-        f"{base_prompt}, incorporating {motifs[2] if len(motifs) > 2 else 'timeless designs'}, without {negative}",
-        f"{base_prompt}, showcasing {motifs[3] if len(motifs) > 3 else 'classical composition'}, no {negative}"
-    ]
+    prompts = []
+    for i, motif in enumerate(motifs):
+        variation_words = ["featuring", "with", "incorporating", "showcasing"]
+        avoid_words = ["avoid", "not", "without", "no"]
+        
+        variation_word = variation_words[i % len(variation_words)]
+        avoid_word = avoid_words[i % len(avoid_words)]
+        
+        prompt = f"{base_prompt}, {variation_word} {motif}, {avoid_word} {negative}"
+        prompts.append(prompt)
+    
+    # Ensure we have at least one prompt even if no motifs provided
+    if not prompts:
+        prompts = [f"{base_prompt}, featuring historical elements, avoid {negative}"]
     
     return prompts
 
 
-def artist_agent(state: RunState) -> Dict[str, Any]:
+async def artist_agent(state: RunState) -> Dict[str, Any]:
     """
-    Artist Agent: Generate art based on LorePack using OpenAI gpt-image-1
+    Artist Agent: Generate art based on LorePack using OpenAI gpt-image-1 with IPFS integration
     
     Input: LorePack with prompt_seed
-    Output: ArtSet with local file paths (temp storage before IPFS)
+    Output: ArtSet with IPFS CIDs for images and thumbnails
+    
+    Process:
+    1. Generate images using OpenAI gpt-image-1
+    2. Create thumbnails with PIL/Pillow (<200KB)
+    3. Pin images and thumbnails to IPFS via MCP
+    4. Return ArtSet with ipfs:// CIDs
     """
     run_id = state.get("run_id", "unknown")
     date_label = state.get("date_label", "Unknown Event")
@@ -123,8 +430,9 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
         prompts = create_image_prompts(prompt_seed, date_label)
         print(f"🎨 ARTIST: Generated {len(prompts)} image prompts")
         
-        # Generate images using OpenAI gpt-image-1
-        generated_files = []
+        # Generate images using OpenAI gpt-image-1 with IPFS integration
+        generated_cids = []
+        thumbnail_cids = []
         style_notes = []
         
         for i, prompt in enumerate(prompts):
@@ -149,8 +457,32 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
                 print(f"🎨 ARTIST: Added progress message {i+1}/4, total messages: {len(current_messages)}")
             
             try:
+                # Generate image
                 filepath = generate_image_openai(prompt, str(filename))
-                generated_files.append(f"file://{filepath}")
+                filepath_obj = pathlib.Path(filepath)
+                
+                # Validate image was created successfully
+                if not filepath_obj.exists():
+                    raise Exception(f"Image file not created: {filepath}")
+                
+                # Create thumbnail
+                thumbnail_data = create_thumbnail(filepath_obj, max_size_kb=200.0)
+                if not thumbnail_data:
+                    raise Exception("Thumbnail creation failed")
+                
+                # Pin image to IPFS (using direct Pinata API)
+                image_cid = await pin_image_to_ipfs_direct(filepath_obj, run_id)
+                if not image_cid:
+                    raise Exception("Image IPFS pinning failed")
+                
+                # Pin thumbnail to IPFS (using direct Pinata API)
+                thumbnail_cid = await pin_thumbnail_to_ipfs_direct(thumbnail_data, f"art_{i+1}.png", run_id)
+                if not thumbnail_cid:
+                    raise Exception("Thumbnail IPFS pinning failed")
+                
+                # Store IPFS CIDs
+                generated_cids.append(f"ipfs://{image_cid}")
+                thumbnail_cids.append(f"ipfs://{thumbnail_cid}")
                 
                 # Create style note based on the prompt variation
                 motifs = prompt_seed.get("motifs", ["historical elements"])
@@ -161,7 +493,7 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
                 completion_message = {
                     "agent": "Artist",
                     "level": "success",
-                    "message": f"Image {i+1}/4 generated successfully ({os.path.getsize(filepath)/1024/1024:.1f}MB)",
+                    "message": f"Image {i+1}/4 generated and pinned to IPFS ({os.path.getsize(filepath)/1024/1024:.1f}MB → ipfs://{image_cid})",
                     "ts": str(uuid.uuid4())
                 }
                 
@@ -174,16 +506,17 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
                     print(f"🎨 ARTIST: Added completion message {i+1}/4, total messages: {len(current_messages)}")
                 
             except Exception as e:
-                print(f"🎨 ARTIST: Failed to generate image {i+1}: {e}")
-                # Use a placeholder for failed generation
-                generated_files.append(f"file://placeholder_art_{i+1}.png")
-                style_notes.append(f"Image generation failed for variation {i+1}")
+                print(f"🎨 ARTIST: Failed to generate or pin image {i+1}: {e}")
+                # Use placeholder CIDs for failed generation
+                generated_cids.append(f"ipfs://placeholder_art_{i+1}")
+                thumbnail_cids.append(f"ipfs://placeholder_thumb_{i+1}")
+                style_notes.append(f"Image generation or IPFS pinning failed for variation {i+1}")
                 
                 # Create and emit error message individually
                 error_message = {
                     "agent": "Artist",
                     "level": "warning",
-                    "message": f"Image {i+1}/4 generation failed: {str(e)[:50]}",
+                    "message": f"Image {i+1}/4 generation/pinning failed: {str(e)[:50]}",
                     "ts": str(uuid.uuid4())
                 }
                 
@@ -195,21 +528,15 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
                     simple_state.update_run_state(run_id, {"messages": current_messages})
                     print(f"🎨 ARTIST: Added error message {i+1}/4, total messages: {len(current_messages)}")
         
-        # Create art set with generated files
+        # Create art set with IPFS CIDs
         art_set = {
-            "cids": generated_files,  # Using file:// paths instead of ipfs:// for now
-            "thumbnails": [
-                # TODO: Generate real thumbnails in Phase 5.4
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjNjY2Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkFydCAjMTwvdGV4dD48L3N2Zz4=",
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjNDQ0Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkFydCAjMjwvdGV4dD48L3N2Zz4=",
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMjIyIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkFydCAjMzwvdGV4dD48L3N2Zz4=",
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMDAwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkFydCAjNDwvdGV4dD48L3N2Zz4="
-            ],
+            "cids": generated_cids,  # Now using ipfs:// CIDs
+            "thumbnails": thumbnail_cids,  # Real thumbnail CIDs from IPFS
             "style_notes": style_notes
         }
         
         # Count successful generations
-        successful_gens = len([f for f in generated_files if not f.startswith("file://placeholder")])
+        successful_gens = len([cid for cid in generated_cids if not cid.startswith("ipfs://placeholder")])
         
         # Final summary message
         final_message = {
@@ -218,8 +545,8 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
             "message": f"🎨 All images complete! Generated {successful_gens}/{len(prompts)} artworks ready for voting",
             "ts": str(uuid.uuid4()),
             "links": [
-                {"label": f"Art #{i+1}", "href": filepath} 
-                for i, filepath in enumerate(generated_files)
+                {"label": f"Art #{i+1}", "href": cid} 
+                for i, cid in enumerate(generated_cids)
             ]
         }
         
@@ -244,19 +571,19 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
     except Exception as e:
         print(f"🎨 ARTIST: Image generation completely failed: {e}")
         
-        # Fallback to placeholder art set
+        # Fallback to placeholder art set  
         art_set = {
             "cids": [
-                "file://fallback_placeholder_1.png",
-                "file://fallback_placeholder_2.png", 
-                "file://fallback_placeholder_3.png",
-                "file://fallback_placeholder_4.png"
+                "ipfs://fallback_placeholder_1",
+                "ipfs://fallback_placeholder_2", 
+                "ipfs://fallback_placeholder_3",
+                "ipfs://fallback_placeholder_4"
             ],
             "thumbnails": [
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjNjY2Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkFydCAjMTwvdGV4dD48L3N2Zz4=",
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjNDQ0Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkFydCAjMjwvdGV4dD48L3N2Zz4=",
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMjIyIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkFydCAjMzwvdGV4dD48L3N2Zz4=",
-                "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjMDAwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkZhbGxiYWNrIDwvdGV4dD48L3N2Zz4="
+                "ipfs://fallback_thumb_1",
+                "ipfs://fallback_thumb_2",
+                "ipfs://fallback_thumb_3",
+                "ipfs://fallback_thumb_4"
             ],
             "style_notes": [
                 "Image generation failed - using fallback placeholder",
