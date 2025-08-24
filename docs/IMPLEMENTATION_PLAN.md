@@ -316,11 +316,76 @@ _Pin real images to IPFS_
 
 _Replace vote simulation with MCP integration_
 
-- Integrate MCP `start_vote` and `vote_status` polling
-- Add timeout fallback logic (pick index 0, record `fallback: true`)
-- Real blockchain vote ID handling
-- **Test**: Can start real vote, poll status, handle timeout
+**Overall Objective:** Transform stubbed voting into real blockchain integration with live polling, user confirmation, and timeout fallback.
+
+#### Phase 5.5.1: Enhanced Vote Agent with MCP Integration ⏳ **IN PROGRESS**
+
+_Integrate real MCP start_vote + add vote transaction checkpoint_
+
+**✅ Implementation Plan:**
+- Replace stubbed vote creation with real MCP `start_vote` call
+- Add `vote_tx_approval` checkpoint for user transaction confirmation  
+- Return `PreparedTx` for frontend wallet signing
+- Maintain two-agent structure: `vote_agent` (start) + `tally_vote_agent` (poll)
+- **Test**: MCP `start_vote` returns real vote_id + valid PreparedTx
 - **Files**: `apps/backend/agents/vote.py`
+
+#### Phase 5.5.2: Vote Transaction Checkpoint Handler
+
+_Add workflow checkpoint for vote transaction confirmation_
+
+**📋 Tasks:**
+- Add `interrupt_after=["vote"]` to LangGraph workflow
+- Implement checkpoint resume handler for `vote_tx_approval`
+- Frontend integration: transaction confirmation → `/resume` with tx_hash
+- Update workflow state management for vote PreparedTx
+- **Test**: Vote checkpoint interrupts workflow, resume advances to tally
+- **Files**: `apps/backend/main.py`, `apps/frontend/components/AgentConsole.tsx`
+
+#### Phase 5.5.3: Polling Tally Agent with Timeout Fallback
+
+_Real-time vote status polling with async SSE updates_
+
+**📋 Tasks:**
+- Replace stubbed tally with real MCP `get_vote_status` polling (5s interval)
+- Implement async polling loop with SSE streaming updates ("Vote in progress...")
+- Add timeout fallback: if `ends_at` expired → pick index 0, record `fallback: true`  
+- Call MCP `tally_vote` for natural completion or implement fallback logic
+- **Test**: Live polling updates, timeout triggers fallback correctly
+- **Files**: `apps/backend/agents/vote.py`
+
+#### Phase 5.5.4: Frontend Vote Progress Integration
+
+_UI for vote confirmation and live progress_
+
+**📋 Tasks:**
+- Add vote transaction confirmation modal with PreparedTx details
+- Display "Vote in progress..." during polling phase
+- Handle vote checkpoint resume flow
+- Show final vote results with winner announcement
+- **Test**: Full frontend flow from vote creation to completion
+- **Files**: `apps/frontend/components/AgentConsole.tsx`, `apps/frontend/lib/api.ts`
+
+#### Phase 5.5.5: Testing & Validation
+
+_End-to-end validation of real voting integration_
+
+**📋 Tasks:**
+- Unit tests: Mock MCP responses, timeout logic, error handling
+- Integration tests: Real MCP server interaction scenarios
+- E2E test: Full workflow with actual vote creation → polling → completion
+- Validate blockchain vote IDs match MCP responses
+- **Test**: Complete voting flow works end-to-end on testnet
+- **Files**: `apps/backend/test_vote_integration.py`
+
+### Overall Phase 5.5 Acceptance Criteria
+
+- ✅ **Real MCP Integration**: `start_vote`, `get_vote_status`, `tally_vote` all working
+- ✅ **Live Polling**: Vote progress streams to frontend every 5 seconds  
+- ✅ **Timeout Fallback**: Expires → pick index 0 with `fallback: true`
+- ✅ **PreparedTx Flow**: User confirms vote transaction via wallet
+- ✅ **Real Vote IDs**: Blockchain vote identifiers used throughout
+- ✅ **Error Resilience**: Happy path assumption, graceful degradation
 
 ### Phase 5.6: Real Mint Agent
 
