@@ -66,6 +66,7 @@ class RunState(TypedDict):
     art: Optional[ArtSet]
     vote: Optional[VoteState]
     prepared_tx: Optional[PreparedTx]
+    mint_tx: Optional[Dict[str, Any]]  # Second transaction for mint after close vote
     mint: Optional[MintReceipt]
     attest: Optional[AttestationReceipt]
     checkpoint: Optional[str]

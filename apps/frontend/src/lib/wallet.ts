@@ -222,6 +222,70 @@ export class WalletManager {
     }
   }
 
+  async sendTransactionAndExtractTokenId(preparedTx: PreparedTx): Promise<{ txHash: string, tokenId?: string }> {
+    console.log('🪙 MINT: Sending transaction and extracting token ID...');
+    
+    // Send transaction first
+    const txHash = await this.sendTransaction(preparedTx);
+    
+    try {
+      // Wait for transaction receipt
+      const receipt = await this.publicClient.waitForTransactionReceipt({ 
+        hash: txHash as `0x${string}`,
+        timeout: 60_000, // 60 second timeout
+      });
+
+      console.log('📄 Mint transaction receipt received:', receipt);
+
+      // Try to parse mint events from the receipt (for DropManager finalizeMint)
+      try {
+        const logs = parseEventLogs({
+          abi: dropManagerABI,
+          logs: receipt.logs,
+        });
+
+        console.log('📊 Parsed mint logs:', logs);
+
+        // Look for MintFinalized or Transfer events
+        const mintEvent = logs.find(log => 
+          log.eventName === 'MintFinalized' || 
+          log.eventName === 'Transfer'
+        );
+        console.log('🔍 Mint event found:', mintEvent);
+        
+        if (mintEvent && mintEvent.args) {
+          // Try to extract token ID from different event types
+          let tokenId: string | undefined;
+          
+          if (mintEvent.eventName === 'MintFinalized' && 'tokenId' in mintEvent.args) {
+            tokenId = String(mintEvent.args.tokenId);
+          } else if (mintEvent.eventName === 'Transfer' && 'tokenId' in mintEvent.args) {
+            tokenId = String(mintEvent.args.tokenId);
+          }
+          
+          if (tokenId) {
+            console.log('🪙 Extracted token ID:', tokenId);
+            console.log('📦 Returning:', { txHash, tokenId });
+            return { txHash, tokenId };
+          } else {
+            console.warn('⚠️ Mint event found but no token ID extracted');
+          }
+        } else {
+          console.warn('⚠️ No mint events found in transaction receipt');
+        }
+      } catch (parseError) {
+        console.warn('⚠️ Could not parse mint events from receipt:', parseError);
+      }
+
+      // Return just the tx hash if no token ID found
+      return { txHash };
+
+    } catch (error) {
+      console.error('❌ Failed to get mint transaction receipt:', error);
+      throw new Error(`Mint transaction receipt timeout or failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
   async getChainId(): Promise<number> {
     if (!window.ethereum) {
       throw new Error('No wallet found');

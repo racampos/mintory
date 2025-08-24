@@ -20,7 +20,7 @@ import { walletManager } from '@/lib/wallet';
 import { toast } from '@/components/ui/use-toast';
 
 interface CheckpointActionsProps {
-  checkpoint: 'lore_approval' | 'art_sanity' | 'vote_tx_approval' | 'finalize_mint';
+  checkpoint: 'lore_approval' | 'art_sanity' | 'vote_tx_approval' | 'close_vote' | 'finalize_mint';
   runState: RunState;
   onAction: (action: CheckpointAction) => void;
   onShowVoting?: () => void;
@@ -44,6 +44,12 @@ const checkpointInfo = {
     description: 'Review and confirm the blockchain vote transaction',
     icon: Vote,
     color: 'text-orange-500',
+  },
+  close_vote: {
+    title: 'Close Vote & Prepare Mint',
+    description: 'Close the voting session and prepare NFT minting',
+    icon: Coins,
+    color: 'text-purple-500',
   },
   finalize_mint: {
     title: 'Finalize NFT Mint',
@@ -382,6 +388,22 @@ export function CheckpointActions({
 
   const renderFinalizeMintActions = () => (
     <div className="space-y-4">
+      {/* Metadata Preview */}
+      {runState.metadata && (
+        <div className="p-4 bg-muted rounded-lg">
+          <h4 className="font-medium mb-2">NFT Metadata Preview</h4>
+          <div className="text-sm text-muted-foreground space-y-2">
+            <div><strong>Name:</strong> {runState.metadata.name}</div>
+            <div><strong>Description:</strong> {runState.metadata.description?.slice(0, 100)}...</div>
+            <div><strong>Attributes:</strong> {runState.metadata.attributes?.length || 0} traits</div>
+            {runState.metadata.image && (
+              <div><strong>Winner Art:</strong> {runState.metadata.image.slice(0, 20)}...</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Vote Results */}
       {runState.vote_result && (
         <div className="p-4 bg-muted rounded-lg">
           <h4 className="font-medium mb-2">Vote Results</h4>
@@ -390,6 +412,18 @@ export function CheckpointActions({
             <div className="mt-1">
               Total votes: {Object.values(runState.vote_result.tally).reduce((a, b) => a + b, 0)}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Preview */}
+      {runState.prepared_tx && (
+        <div className="p-3 border rounded-lg">
+          <h4 className="font-medium text-sm mb-2">Transaction Preview</h4>
+          <div className="text-xs font-mono space-y-1">
+            <div><span className="text-muted-foreground">To:</span> {runState.prepared_tx.to}</div>
+            <div><span className="text-muted-foreground">Gas:</span> {runState.prepared_tx.gas?.toLocaleString() || 'Auto'}</div>
+            <div><span className="text-muted-foreground">Value:</span> {runState.prepared_tx.value || '0x0'} ETH</div>
           </div>
         </div>
       )}
@@ -405,13 +439,169 @@ export function CheckpointActions({
       </div>
 
       <Button
-        onClick={() => handleAction('finalize')}
-        disabled={isSubmitting}
+        onClick={async () => {
+          if (!runState.prepared_tx) {
+            toast({
+              title: "Error",
+              description: "No prepared transaction available",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          try {
+            setIsSubmitting(true);
+            
+            // Switch to correct chain if needed
+            const currentChainId = await walletManager.getChainId();
+            const targetChainId = 11011; // Shape Testnet
+            
+            if (currentChainId !== targetChainId) {
+              console.log(`🔄 Switching from chain ${currentChainId} to ${targetChainId}`);
+              await walletManager.switchToShapeTestnet();
+            }
+
+            console.log('🪙 MINT: Sending mint transaction:', runState.prepared_tx);
+            
+            // Send transaction and wait for confirmation
+            const { txHash, tokenId } = await walletManager.sendTransactionAndExtractTokenId(runState.prepared_tx);
+            
+            console.log('🎉 MINT: Transaction confirmed:', { txHash, tokenId });
+            
+            toast({
+              title: "NFT Minted Successfully!",
+              description: `Token ID: ${tokenId || 'TBD'} | TX: ${txHash.slice(0, 10)}...`,
+            });
+
+            // Send confirmation to backend
+            handleAction('finalize', { tx_hash: txHash, token_id: tokenId });
+            
+          } catch (error) {
+            console.error('❌ MINT: Transaction failed:', error);
+            toast({
+              title: "Mint Transaction Failed",
+              description: error instanceof Error ? error.message : 'Unknown error',
+              variant: "destructive",
+            });
+            setIsSubmitting(false);
+          }
+        }}
+        disabled={isSubmitting || !runState.prepared_tx}
         className="w-full"
         size="lg"
       >
         <Coins className="h-4 w-4 mr-2" />
-        {isSubmitting ? 'Minting...' : 'Finalize Mint'}
+        {isSubmitting ? 'Minting...' : 'Confirm & Sign Transaction'}
+      </Button>
+    </div>
+  );
+
+  const renderCloseVoteActions = () => (
+    <div className="space-y-4">
+      {/* Metadata Preview */}
+      {runState.metadata && (
+        <div className="p-4 bg-muted rounded-lg">
+          <h4 className="font-medium mb-2">NFT Metadata Preview</h4>
+          <div className="text-sm text-muted-foreground space-y-2">
+            <div><strong>Name:</strong> {runState.metadata.name}</div>
+            <div><strong>Description:</strong> {runState.metadata.description?.slice(0, 100)}...</div>
+            <div><strong>Attributes:</strong> {runState.metadata.attributes?.length || 0} traits</div>
+            {runState.metadata.image && (
+              <div><strong>Winner Art:</strong> {runState.metadata.image.slice(0, 20)}...</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Vote Results */}
+      {runState.vote_result && (
+        <div className="p-4 bg-muted rounded-lg">
+          <h4 className="font-medium mb-2">Vote Results</h4>
+          <div className="text-sm text-muted-foreground">
+            <div>Winner: {runState.vote_result.winner_cid.slice(0, 16)}...</div>
+            <div className="mt-1">
+              Total votes: {Object.values(runState.vote_result.tally).reduce((a, b) => a + b, 0)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Preview */}
+      {runState.prepared_tx && (
+        <div className="p-3 border rounded-lg">
+          <h4 className="font-medium text-sm mb-2">Close Vote Transaction</h4>
+          <div className="text-xs font-mono space-y-1">
+            <div><span className="text-muted-foreground">To:</span> {runState.prepared_tx.to}</div>
+            <div><span className="text-muted-foreground">Gas:</span> {runState.prepared_tx.gas?.toLocaleString() || 'Auto'}</div>
+            <div><span className="text-muted-foreground">Value:</span> {runState.prepared_tx.value || '0x0'} ETH</div>
+          </div>
+        </div>
+      )}
+
+      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-center gap-2 text-blue-800">
+          <Coins className="h-4 w-4" />
+          <span className="text-sm font-medium">Step 1: Close Vote</span>
+        </div>
+        <p className="text-xs text-blue-700 mt-1">
+          This will close the voting session on-chain, then you can mint the NFT.
+        </p>
+      </div>
+
+      <Button
+        onClick={async () => {
+          if (!runState.prepared_tx) {
+            toast({
+              title: "Error",
+              description: "No prepared transaction available",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          try {
+            setIsSubmitting(true);
+            
+            // Switch to correct chain if needed
+            const currentChainId = await walletManager.getChainId();
+            const targetChainId = 11011; // Shape Testnet
+            
+            if (currentChainId !== targetChainId) {
+              console.log(`🔄 Switching from chain ${currentChainId} to ${targetChainId}`);
+              await walletManager.switchToShapeTestnet();
+            }
+
+            console.log('🔐 CLOSE VOTE: Sending close vote transaction:', runState.prepared_tx);
+            
+            // Send close vote transaction and wait for confirmation
+            const { txHash } = await walletManager.sendTransactionAndExtractTokenId(runState.prepared_tx);
+            
+            console.log('🎉 CLOSE VOTE: Transaction confirmed:', { txHash });
+            
+            toast({
+              title: "Vote Closed Successfully!",
+              description: `TX: ${txHash.slice(0, 10)}... Now ready to mint!`,
+            });
+
+            // Send confirmation to backend
+            handleAction('close', { tx_hash: txHash });
+            
+          } catch (error) {
+            console.error('❌ CLOSE VOTE: Transaction failed:', error);
+            toast({
+              title: "Close Vote Transaction Failed",
+              description: error instanceof Error ? error.message : 'Unknown error',
+              variant: "destructive",
+            });
+            setIsSubmitting(false);
+          }
+        }}
+        disabled={isSubmitting || !runState.prepared_tx}
+        className="w-full"
+        size="lg"
+      >
+        <Coins className="h-4 w-4 mr-2" />
+        {isSubmitting ? 'Closing Vote...' : 'Confirm & Close Vote'}
       </Button>
     </div>
   );
@@ -424,6 +614,8 @@ export function CheckpointActions({
         return renderArtSanityActions();
       case 'vote_tx_approval':
         return renderVoteTxApprovalActions();
+      case 'close_vote':
+        return renderCloseVoteActions();
       case 'finalize_mint':
         return renderFinalizeMintActions();
       default:

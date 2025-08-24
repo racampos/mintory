@@ -12,13 +12,20 @@ export interface RunState {
   date_label: string;
   status: 'running' | 'waiting' | 'completed' | 'error';
   current_agent?: string;
-  checkpoint?: 'lore_approval' | 'art_sanity' | 'vote_tx_approval' | 'finalize_mint';
+  checkpoint?: 'lore_approval' | 'art_sanity' | 'vote_tx_approval' | 'close_vote' | 'finalize_mint';
   lore_pack?: LorePack;
   art_set?: ArtSet;
   vote?: Vote;
   prepared_tx?: PreparedTx;
   vote_result?: VoteResult;
   mint_receipt?: MintReceipt;
+  metadata?: {
+    name: string;
+    description: string;
+    image: string;
+    attributes: Array<{trait_type: string; value: any}>;
+    properties: Record<string, any>;
+  };
 }
 
 export interface LorePack {
@@ -91,7 +98,7 @@ export interface MedalInfo {
 }
 
 export interface CheckpointAction {
-  checkpoint: 'lore_approval' | 'art_sanity' | 'vote_tx_approval' | 'finalize_mint';
-  decision: 'approve' | 'edit' | 'proceed' | 'regen' | 'confirm' | 'finalize';
+  checkpoint: 'lore_approval' | 'art_sanity' | 'vote_tx_approval' | 'close_vote' | 'finalize_mint';
+  decision: 'approve' | 'edit' | 'proceed' | 'regen' | 'confirm' | 'finalize' | 'close';
   payload: any;
 }

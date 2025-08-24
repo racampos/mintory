@@ -358,11 +358,38 @@ class MCPClient:
             tally=response["tally"]
         )
     
-    async def create_mint_transaction(self, winner_cid: str, metadata_cid: str) -> PreparedTx:
+    async def create_close_vote_transaction(self, vote_id: str):
+        """
+        Create a transaction to close a vote, or get skip instruction if vote already closed
+        
+        Args:
+            vote_id: The vote ID to close
+            
+        Returns:
+            PreparedTx for closing the vote, or dict with skip_close=True if vote already closed
+        """
+        json_data = {"vote_id": vote_id}
+        response = await self._make_request("POST", "/mcp/close_vote", json_data=json_data)
+        
+        # Check if MCP server says to skip close vote
+        if response.get("skip_close"):
+            return {"skip_close": True, "message": response.get("message", "Vote already closed")}
+        
+        # Normal case: return PreparedTx
+        tx_data = response["tx"]
+        return PreparedTx(
+            to=tx_data["to"],
+            data=tx_data["data"],
+            value=tx_data.get("value"),
+            gas=tx_data.get("gas")
+        )
+    
+    async def create_mint_transaction(self, vote_id: str, winner_cid: str, metadata_cid: str) -> PreparedTx:
         """
         Create a transaction to finalize an NFT mint
         
         Args:
+            vote_id: The vote ID to finalize
             winner_cid: CID of the winning art
             metadata_cid: CID of the metadata
             
@@ -370,6 +397,7 @@ class MCPClient:
             PreparedTx for minting the NFT
         """
         json_data = {
+            "vote_id": vote_id,
             "winner_cid": winner_cid,
             "metadataCid": metadata_cid
         }

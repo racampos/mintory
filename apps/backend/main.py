@@ -98,7 +98,7 @@ def create_workflow(checkpointer) -> StateGraph:
     return workflow.compile(
         checkpointer=checkpointer,
         interrupt_before=["artist"],  # Interrupt after lore for approval
-        interrupt_after=["vote", "mint"]  # Interrupt after vote for tx confirmation, after mint for finalize
+        interrupt_after=["vote", "mint"]  # Interrupt after vote for tx confirmation, after mint for close vote & finalize
     )
 
 
@@ -223,8 +223,12 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                 yield f"data: {json.dumps(error_data)}\n\n"
                 return
             
-            # If workflow is already complete, send only unseen messages, then completion
-            if current_state.get("mint") and not current_state.get("error"):
+            # If workflow is already complete (mint present AND no active checkpoint), send only unseen messages, then completion
+            has_mint = current_state.get("mint") is not None
+            has_error = current_state.get("error") is not None
+            has_active_checkpoint = current_state.get("checkpoint") is not None
+            
+            if has_mint and not has_error and not has_active_checkpoint:
                 print(f"Run {run_id} already completed, sending messages from index {last_message_index} then completion event")
                 
                 # Send only unseen agent messages
@@ -275,6 +279,8 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                 yield f"event: error\n"
                 yield f"data: {json.dumps(error_data)}\n\n"
                 return
+            elif has_mint and has_active_checkpoint:
+                print(f"📍 SSE: Run {run_id} has mint but active checkpoint '{current_state.get('checkpoint')}' - starting live stream for checkpoint")
             
             print(f"Starting live stream monitoring for run {run_id}, resuming from message index {last_message_index}")
             last_message_count = last_message_index  # Resume from where client left off
@@ -357,9 +363,13 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                     if poll_count % 500 == 0:  # Log every 500 polls (~5s) to reduce noise
                         print(f"📡 SSE: No state changes detected for {run_id} (poll #{poll_count})")
                 
-                # Check if workflow is complete
-                if current_state.get("mint") and not current_state.get("error"):
-                    print(f"Workflow {run_id} completed, ending SSE stream")
+                # Check if workflow is complete (has mint AND no active checkpoint)
+                has_mint = current_state.get("mint") is not None
+                has_error = current_state.get("error") is not None  
+                has_active_checkpoint = current_state.get("checkpoint") is not None
+                
+                if has_mint and not has_error and not has_active_checkpoint:
+                    print(f"Workflow {run_id} completed (mint present, no error, no active checkpoint), ending SSE stream")
                     try:
                         completion_data = {"run_id": run_id, "status": "completed"}
                         yield f"event: complete\n"
@@ -369,6 +379,8 @@ async def stream_run(run_id: str, last_message_index: int = 0):
                     except Exception as completion_error:
                         print(f"Error sending completion event for {run_id}: {completion_error}")
                         raise
+                elif has_mint and has_active_checkpoint:
+                    print(f"📍 SSE: Workflow has mint but active checkpoint '{current_state.get('checkpoint')}' - keeping stream alive")
                 
                 # Check for errors
                 if current_state.get("error"):
@@ -473,22 +485,108 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
             else:
                 raise HTTPException(status_code=400, detail="Invalid decision for vote_tx_approval. Expected 'confirm'.")
         
+        elif request.checkpoint == "close_vote":
+            if request.decision == "close":
+                # Get transaction hash from payload
+                tx_hash = request.payload.get("tx_hash")
+                
+                if not tx_hash:
+                    raise HTTPException(status_code=400, detail="Transaction hash required for close vote confirmation")
+                
+                # Prepare confirmation message
+                confirmation_message = {
+                    "agent": "Mint",
+                    "level": "success",
+                    "message": f"🔐 Vote closed successfully! TX: {tx_hash[:10]}...{tx_hash[-6:]} - Ready for final minting step.",
+                    "ts": str(uuid.uuid4()),
+                    "links": [{"label": "View Transaction", "href": f"https://explorer.shape.network/tx/{tx_hash}"}]
+                }
+                current_state.setdefault("messages", []).append(confirmation_message)
+                
+                # Now prepare for the mint transaction (stored in mint_tx from the mint agent)
+                mint_tx_data = current_state.get("mint_tx", {})
+                print(f"🔍 DEBUG: mint_tx_data = {mint_tx_data}")
+                print(f"🔍 DEBUG: current_state keys = {list(current_state.keys())}")
+                if mint_tx_data:
+                    # Update the prepared_tx to be the mint transaction
+                    current_state["prepared_tx"] = mint_tx_data
+                    current_state["checkpoint"] = "finalize_mint"
+                    
+                    # Add a message to indicate the second step is ready
+                    mint_ready_message = {
+                        "agent": "Mint",
+                        "level": "info",
+                        "message": f"🎯 Vote closed successfully! Now ready for final minting step.",
+                        "ts": str(uuid.uuid4()),
+                        "links": [
+                            {"label": "View Close Vote TX", "href": f"https://explorer.shape.network/tx/{tx_hash}"},
+                            {"label": "Metadata Preview", "href": current_state.get("metadata", {}).get("image", "")}
+                        ]
+                    }
+                    current_state.setdefault("messages", []).append(mint_ready_message)
+                    
+                    print(f"🪙 CLOSE VOTE: Vote closed, checkpoint set to finalize_mint")
+                    print(f"🪙 CLOSE VOTE: Mint tx available - to: {mint_tx_data.get('to', 'unknown')}, gas: {mint_tx_data.get('gas', 'unknown')}")
+                else:
+                    # Clear checkpoint to complete workflow if no mint tx
+                    current_state["checkpoint"] = None
+                    print(f"🪙 CLOSE VOTE: Vote closed, no mint transaction available")
+                    print(f"🪙 CLOSE VOTE: Available state keys: {list(current_state.keys())}")
+            else:
+                raise HTTPException(status_code=400, detail="Invalid decision for close_vote. Expected 'close'.")
+                
         elif request.checkpoint == "finalize_mint":
             if request.decision == "finalize":
-                # Add a completion message and clear checkpoint
+                # Get transaction hash and token ID from payload
+                tx_hash = request.payload.get("tx_hash")
+                token_id = request.payload.get("token_id")
+                
+                if not tx_hash:
+                    raise HTTPException(status_code=400, detail="Transaction hash required for mint finalization")
+                
+                # Prepare confirmation message
+                if token_id:
+                    message_text = f"🪙 NFT minted successfully! Token ID: {token_id} | TX: {tx_hash[:10]}...{tx_hash[-6:]}"
+                    print(f"🎉 MINT: NFT minted with token ID: {token_id}")
+                else:
+                    message_text = f"🪙 NFT transaction confirmed - {tx_hash[:10]}...{tx_hash[-6:]} (token ID will be available shortly)"
+                    print(f"⚠️ MINT: Transaction confirmed but token ID not extracted: {tx_hash}")
+                
                 completion_message = {
-                    "agent": "System",
-                    "level": "info", 
-                    "message": "Mint finalized by user approval",
-                    "ts": str(uuid.uuid4())
+                    "agent": "Mint",
+                    "level": "success",
+                    "message": message_text,
+                    "ts": str(uuid.uuid4()),
+                    "links": [
+                        {"label": "View Transaction", "href": f"https://explorer.shape.network/tx/{tx_hash}"},
+                        {"label": "Metadata", "href": current_state.get("mint", {}).get("token_uri", "")}
+                    ]
                 }
                 current_state.setdefault("messages", []).append(completion_message)
+                
+                # Update mint receipt with real transaction data
+                if current_state.get("mint"):
+                    current_state["mint"]["tx_hash"] = tx_hash
+                    if token_id:
+                        current_state["mint"]["token_id"] = token_id
+                        print(f"🪙 MINT: Updated mint receipt with token ID: {token_id}")
+                    else:
+                        print(f"⚠️ MINT: No token ID provided, keeping existing or empty")
+                
+                # Clear checkpoint to complete workflow
                 current_state["checkpoint"] = None
+                print(f"🪙 MINT: Transaction confirmed, workflow complete")
             else:
-                raise HTTPException(status_code=400, detail="Invalid decision for finalize_mint")
+                raise HTTPException(status_code=400, detail="Invalid decision for finalize_mint. Expected 'finalize'.")
         
         # Update state in storage
         simple_state.update_run_state(run_id, current_state)
+        
+        # ✅ CRITICAL FIX for finalize_mint checkpoint: Force workflow to stay active
+        if current_state.get("checkpoint") == "finalize_mint":
+            print(f"🛠️ CRITICAL: finalize_mint checkpoint detected - workflow must stay active for second transaction")
+            # Don't resume workflow - let SSE polling detect the new checkpoint state
+            return {"message": "Close vote confirmed, ready for mint", "status": "awaiting_finalize_mint", "checkpoint": "finalize_mint"}
         
         # ✅ CRITICAL FIX: Update LangGraph checkpointer state with real vote ID
         workflow = workflows["main"]

@@ -29,7 +29,12 @@ export const TallyVoteRequestSchema = z.object({
   vote_id: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid vote ID'),
 });
 
+export const CloseVoteRequestSchema = z.object({
+  vote_id: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid vote ID'),
+});
+
 export const MintFinalRequestSchema = z.object({
+  vote_id: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid vote ID'),
   winner_cid: z.string(),
   metadataCid: z.string(),
 });
