@@ -252,9 +252,20 @@ async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
         
         # Determine completion type
         vote_ended_naturally = False
+        has_votes = False
+        
         try:
             final_status: VoteStatus = await mcp_client.get_vote_status(vote_id)
             vote_ended_naturally = not final_status.open
+            
+            # Check if there are any votes cast (even if vote is still open)
+            has_votes = final_status.tallies and any(count > 0 for count in final_status.tallies)
+            
+            # Smart completion: if votes exist and we've polled enough, treat as naturally ready
+            if not vote_ended_naturally and has_votes and poll_count >= 12:  # At least 1 minute of polling
+                print(f"📊 TALLY: Smart completion - votes exist {final_status.tallies}, treating as ready")
+                vote_ended_naturally = True
+                
         except:
             print("📊 TALLY: Could not get final status, assuming timeout")
         

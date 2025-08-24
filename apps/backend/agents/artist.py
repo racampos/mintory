@@ -624,8 +624,7 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
         thumbnail_cids = []
         style_notes = []
         
-        # Temporary: Only generate one image for faster testing
-        for i, prompt in enumerate(prompts[:1]):
+        for i, prompt in enumerate(prompts):
             filename = temp_dir / f"art_{i+1}.png"
             print(f"🎨 ARTIST: Generating image {i+1}/4: {prompt[:100]}...")
             
