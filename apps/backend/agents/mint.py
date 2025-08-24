@@ -79,10 +79,17 @@ async def mint_agent(state: RunState) -> Dict[str, Any]:
             current_messages.append(start_message)
             simple_state.update_run_state(run_id, {"messages": current_messages})
         
+        # Convert IPFS URL to HTTP gateway URL for better explorer compatibility
+        def ipfs_to_http(cid: str) -> str:
+            if cid.startswith('ipfs://'):
+                hash_part = cid[7:]  # Remove 'ipfs://' prefix
+                return f"https://ipfs.io/ipfs/{hash_part}"
+            return f"https://ipfs.io/ipfs/{cid}"
+        
         metadata = {
             "name": f"{lore.get('title', state['date_label'])} — {state['date_label']}",
             "description": f"Commemorative NFT capturing the historical significance of {state['date_label']}. {lore['summary_md'][:200]}{'...' if len(lore['summary_md']) > 200 else ''}",
-            "image": winner_cid,
+            "image": ipfs_to_http(winner_cid),
             "attributes": [
                 {"trait_type": "Date", "value": state["date_label"]},
                 {"trait_type": "Winner CID", "value": winner_cid},
