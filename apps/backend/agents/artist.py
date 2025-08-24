@@ -414,7 +414,7 @@ def pin_thumbnail_to_ipfs_sync(thumbnail_data: bytes, filename: str, run_id: str
         return None
 
 
-def generate_image_openai(prompt: str, filename: str, size: str = "1536x1024") -> str:
+def generate_image_openai_real(prompt: str, filename: str, size: str = "1536x1024") -> str:
     """Generate image using OpenAI gpt-image-1 model."""
     oa = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     
@@ -441,6 +441,85 @@ def generate_image_openai(prompt: str, filename: str, size: str = "1536x1024") -
     except Exception as e:
         elapsed = time.time() - start_time
         print(f"    ⚠️ OpenAI generation failed after {elapsed:.1f}s: {e}")
+        raise
+
+
+def generate_image_openai(prompt: str, filename: str, size: str = "1536x1024") -> str:
+    """🎭 MOCK: Generate a fake image for testing without OpenAI API calls."""
+    from PIL import Image, ImageDraw, ImageFont
+    import hashlib
+    
+    print(f"    🎭 MOCK: Creating test image... ({time.strftime('%H:%M:%S')})")
+    start_time = time.time()
+    
+    try:
+        # Parse size (e.g., "1536x1024")
+        width, height = map(int, size.split('x'))
+        
+        # Create a colorful gradient based on prompt hash
+        prompt_hash = hashlib.md5(prompt.encode()).hexdigest()
+        color_r = int(prompt_hash[:2], 16)
+        color_g = int(prompt_hash[2:4], 16) 
+        color_b = int(prompt_hash[4:6], 16)
+        
+        # Create gradient image
+        image = Image.new('RGB', (width, height))
+        draw = ImageDraw.Draw(image)
+        
+        # Create a gradient background
+        for y in range(height):
+            intensity = y / height
+            r = int(color_r * (1 - intensity) + 255 * intensity)
+            g = int(color_g * (1 - intensity) + 255 * intensity)
+            b = int(color_b * (1 - intensity) + 255 * intensity)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+        
+        # Add some geometric shapes for visual interest
+        draw.ellipse([width//4, height//4, 3*width//4, 3*height//4], 
+                    outline=(255-color_r, 255-color_g, 255-color_b), width=8)
+        draw.rectangle([width//8, height//8, width//2, height//2], 
+                      outline=(color_b, color_r, color_g), width=4)
+        
+        # Add text overlay
+        try:
+            # Try to use a default font, fallback to built-in if not available
+            font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", 40)
+        except:
+            font = ImageFont.load_default()
+            
+        text = "MOCK IMAGE"
+        prompt_preview = prompt[:30] + "..." if len(prompt) > 30 else prompt
+        
+        # Add text with background
+        text_bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        
+        text_x = (width - text_width) // 2
+        text_y = height // 2 - 60
+        
+        # Background rectangle for text
+        draw.rectangle([text_x - 10, text_y - 10, text_x + text_width + 10, text_y + text_height + 10], 
+                      fill=(0, 0, 0, 128))
+        draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
+        
+        # Add prompt preview
+        draw.text((width//20, height - 100), f"Prompt: {prompt_preview}", 
+                 fill=(255, 255, 255), font=font)
+        
+        # Save image
+        filepath = pathlib.Path(filename)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        image.save(filepath, 'PNG', quality=95)
+        
+        elapsed = time.time() - start_time
+        print(f"    ✅ Mock image generated in {elapsed:.3f}s")
+        
+        return str(filepath.absolute())
+        
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"    ⚠️ Mock generation failed after {elapsed:.1f}s: {e}")
         raise
 
 

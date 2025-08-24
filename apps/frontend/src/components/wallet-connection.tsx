@@ -40,7 +40,7 @@ export function WalletConnection({ onConnect }: WalletConnectionProps) {
         setAddress(accounts[0]);
         setIsConnected(true);
         setChainId(currentChainId);
-        setWrongNetwork(currentChainId !== 360); // Shape testnet
+        setWrongNetwork(currentChainId !== 11011); // Shape testnet
         onConnect(accounts[0]);
       }
     } catch (error) {
@@ -66,7 +66,7 @@ export function WalletConnection({ onConnect }: WalletConnectionProps) {
       setAddress(accounts[0]);
       setIsConnected(true);
       setChainId(currentChainId);
-      setWrongNetwork(currentChainId !== 360);
+      setWrongNetwork(currentChainId !== 11011);
       onConnect(accounts[0]);
 
       toast({
@@ -92,7 +92,7 @@ export function WalletConnection({ onConnect }: WalletConnectionProps) {
       await walletManager.switchToShapeTestnet();
       const currentChainId = await walletManager.getChainId();
       setChainId(currentChainId);
-      setWrongNetwork(currentChainId !== 360);
+      setWrongNetwork(currentChainId !== 11011);
 
       toast({
         title: 'Network Switched',
@@ -132,7 +132,7 @@ export function WalletConnection({ onConnect }: WalletConnectionProps) {
     const handleChainChanged = (chainIdHex: string) => {
       const newChainId = parseInt(chainIdHex, 16);
       setChainId(newChainId);
-      setWrongNetwork(newChainId !== 360);
+      setWrongNetwork(newChainId !== 11011);
     };
 
     window.ethereum.on('accountsChanged', handleAccountsChanged);
@@ -185,7 +185,7 @@ export function WalletConnection({ onConnect }: WalletConnectionProps) {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm">Network</span>
               <Badge variant={wrongNetwork ? 'destructive' : 'default'}>
-                {chainId === 360 ? 'Shape Testnet' : `Chain ${chainId}`}
+                {chainId === 11011 ? 'Shape Testnet' : `Chain ${chainId}`}
               </Badge>
             </div>
             

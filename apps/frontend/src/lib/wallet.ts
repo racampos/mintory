@@ -3,9 +3,8 @@ import type { PreparedTx } from "./types";
 
 // Shape testnet configuration
 export const shapeTestnet: Chain = {
-  id: 360,
+  id: 11011,
   name: 'Shape Testnet',
-  network: 'shape-testnet',
   nativeCurrency: {
     decimals: 18,
     name: 'Ether',
@@ -27,7 +26,6 @@ export class WalletManager {
   constructor() {
     if (typeof window !== 'undefined' && window.ethereum) {
       this.client = createWalletClient({
-        chain: shapeTestnet,
         transport: custom(window.ethereum),
       });
     }
@@ -53,7 +51,7 @@ export class WalletManager {
     try {
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x168' }], // 360 in hex
+        params: [{ chainId: '0x2B03' }], // 11011 in hex
       });
     } catch (error: any) {
       // Chain doesn't exist, add it
@@ -61,7 +59,7 @@ export class WalletManager {
         await window.ethereum.request({
           method: 'wallet_addEthereumChain',
           params: [{
-            chainId: '0x168',
+            chainId: '0x2B03',
             chainName: 'Shape Testnet',
             rpcUrls: ['https://testnet.rpc.shape.network'],
             nativeCurrency: {
@@ -88,9 +86,10 @@ export class WalletManager {
     const hash = await this.client.sendTransaction({
       to: tx.to,
       data: tx.data,
-      value: tx.value,
+      value: tx.value || "0x0",  // Convert null/undefined to "0x0"
       gas: tx.gas,
       account,
+      chain: shapeTestnet,  // Provide chain context for the transaction
     });
 
     return hash;

@@ -8,7 +8,7 @@ const nextConfig = {
     MCP_URL: process.env.MCP_URL || 'http://localhost:3001',
     
     // Client-side environment variables  
-    NEXT_PUBLIC_CHAIN_ID: process.env.NEXT_PUBLIC_CHAIN_ID || '360',
+    NEXT_PUBLIC_CHAIN_ID: process.env.NEXT_PUBLIC_CHAIN_ID || '11011',
   },
 }
 

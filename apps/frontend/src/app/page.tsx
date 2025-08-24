@@ -52,20 +52,32 @@ export default function Home() {
   };
 
   const handleCheckpointAction = async (action: any) => {
-    if (!runState) return;
+    console.log('🎬 handleCheckpointAction called with:', action);
+    if (!runState) {
+      console.log('❌ No runState available, cannot proceed');
+      return;
+    }
 
     try {
+      console.log('🌐 Making request to:', `/api/orchestrator/runs/${runState.run_id}/resume`);
       const response = await fetch(`/api/orchestrator/runs/${runState.run_id}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(action),
       });
 
+      console.log('📡 Response status:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error(`Failed to resume run: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error('❌ Response error:', errorText);
+        throw new Error(`Failed to resume run: ${response.statusText} - ${errorText}`);
       }
+
+      const result = await response.text();
+      console.log('✅ Resume successful, response:', result);
     } catch (error) {
-      console.error('Failed to perform checkpoint action:', error);
+      console.error('❌ Failed to perform checkpoint action:', error);
     }
   };
 

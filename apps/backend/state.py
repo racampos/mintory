@@ -51,6 +51,13 @@ class AttestationReceipt(BaseModel):
     uri: str
 
 
+class PreparedTx(BaseModel):
+    to: str
+    data: str
+    value: Optional[str] = None
+    gas: Optional[int] = None
+
+
 # Main orchestrator state - using TypedDict for LangGraph compatibility
 class RunState(TypedDict):
     run_id: str
@@ -58,6 +65,7 @@ class RunState(TypedDict):
     lore: Optional[LorePack]
     art: Optional[ArtSet]
     vote: Optional[VoteState]
+    prepared_tx: Optional[PreparedTx]
     mint: Optional[MintReceipt]
     attest: Optional[AttestationReceipt]
     checkpoint: Optional[str]

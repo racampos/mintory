@@ -155,6 +155,19 @@ async def start_workflow(run_id: str, initial_state: RunState):
                 if chunk.get(key) is not None:
                     completed_agents.append(key)
             print(f"📡 WORKFLOW: Completed agents: {completed_agents}")
+            print(f"📡 WORKFLOW: All chunk keys: {list(chunk.keys())}")
+            if chunk.get('prepared_tx'):
+                print(f"📡 WORKFLOW: PreparedTx in chunk: {chunk.get('prepared_tx')}")
+            else:
+                print(f"📡 WORKFLOW: No prepared_tx in chunk")
+            
+            # Debug specific vote completion
+            if 'vote' in completed_agents:
+                print(f"📡 WORKFLOW: Vote agent completed, checking state...")
+                print(f"📡 WORKFLOW: Vote data in chunk: {chunk.get('vote')}")
+                print(f"📡 WORKFLOW: Checkpoint in chunk: {chunk.get('checkpoint')}")
+                if not chunk.get('prepared_tx'):
+                    print(f"🚨 WORKFLOW: Vote completed but prepared_tx is MISSING from chunk!")
             
             # Show messages in this accumulated state
             if chunk.get('messages'):
@@ -554,6 +567,21 @@ async def continue_workflow_after_resume(run_id: str, config: Dict[str, Any]):
         # Continue streaming from checkpoint - NO INPUT so it resumes from where it left off
         async for chunk in workflow.astream(None, config=config, stream_mode="values"):
             print(f"📡 WORKFLOW RESUME: Node completed for {run_id}, accumulated state has {len(chunk.get('messages', []))} messages")
+            
+            # Debug resume chunk contents
+            completed_agents = []
+            for key in ['lore', 'art', 'vote', 'mint']:
+                if chunk.get(key) is not None:
+                    completed_agents.append(key)
+            print(f"📡 WORKFLOW RESUME: Completed agents: {completed_agents}")
+            print(f"📡 WORKFLOW RESUME: All chunk keys: {list(chunk.keys())}")
+            if chunk.get('prepared_tx'):
+                print(f"📡 WORKFLOW RESUME: PreparedTx in chunk: {chunk.get('prepared_tx')}")
+            else:
+                print(f"📡 WORKFLOW RESUME: No prepared_tx in chunk")
+                
+            if 'vote' in completed_agents and not chunk.get('prepared_tx'):
+                print(f"🚨 WORKFLOW RESUME: Vote completed but prepared_tx is MISSING from chunk!")
             
             # Update state immediately with accumulated state for real-time streaming
             simple_state.update_run_state(run_id, chunk)

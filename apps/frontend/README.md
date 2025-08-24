@@ -29,7 +29,7 @@ Next.js frontend for the Shapecraft AI-powered NFT creation platform.
 ### Wallet Integration
 
 - viem-powered wallet client
-- Shape testnet (Chain ID: 360) support
+- Shape testnet (Chain ID: 11011) support
 - PreparedTx signing workflow
 - Network switching helpers
 
@@ -65,7 +65,7 @@ BACKEND_URL=http://localhost:8000
 MCP_URL=http://localhost:3001
 
 # Client-side (browser)
-NEXT_PUBLIC_CHAIN_ID=360
+NEXT_PUBLIC_CHAIN_ID=11011
 
 # AI Services
 OPENAI_API_KEY=your_key_here

@@ -21,7 +21,7 @@ export function formatCid(cid: string): string {
 
 export function getExplorerUrl(chainId: number, hash: string): string {
   // Shape testnet explorer
-  if (chainId === 360) {
+  if (chainId === 11011) {
     return `https://explorer.shape.network/tx/${hash}`;
   }
   return `https://etherscan.io/tx/${hash}`;

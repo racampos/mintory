@@ -4,7 +4,7 @@ Vote Agent - Handle voting via MCP tools with real blockchain integration
 import uuid
 import asyncio
 from typing import Dict, Any
-from state import RunState, VoteConfig, VoteState, VoteResult
+from state import RunState, VoteConfig, VoteState, PreparedTx, VoteResult
 from services.mcp_client import get_mcp_client
 
 
@@ -79,17 +79,25 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
         }
         
         # ✅ CHECKPOINT: Add vote_tx_approval for user transaction confirmation
-        return {
+        prepared_tx_obj = PreparedTx(
+            to=prepared_tx.to,
+            data=prepared_tx.data,
+            value=prepared_tx.value if hasattr(prepared_tx, 'value') and prepared_tx.value is not None else "0x0",
+            gas=prepared_tx.gas if hasattr(prepared_tx, 'gas') else 100000
+        )
+        
+        print(f"🗳️ VOTE: PreparedTx object: {prepared_tx_obj.dict()}")
+        print(f"🗳️ VOTE: Vote state: {vote_state.dict()}")
+        
+        result = {
             "vote": vote_state.dict(),
-            "prepared_tx": {  # PreparedTx for frontend wallet signing
-                "to": prepared_tx.to,
-                "data": prepared_tx.data,
-                "value": prepared_tx.value if hasattr(prepared_tx, 'value') else "0x0",
-                "gas": prepared_tx.gas if hasattr(prepared_tx, 'gas') else None
-            },
+            "prepared_tx": prepared_tx_obj.dict(),
             "checkpoint": "vote_tx_approval",  # ✅ NEW CHECKPOINT
             "messages": [start_message]
         }
+        
+        print(f"🗳️ VOTE: Full result being returned: {result}")
+        return result
         
     except Exception as e:
         print(f"🗳️ VOTE: Failed to create vote: {e}")

@@ -16,9 +16,11 @@ import {
   Coins
 } from 'lucide-react';
 import type { RunState, CheckpointAction } from '@/lib/types';
+import { walletManager } from '@/lib/wallet';
+import { toast } from '@/components/ui/use-toast';
 
 interface CheckpointActionsProps {
-  checkpoint: 'lore_approval' | 'art_sanity' | 'finalize_mint';
+  checkpoint: 'lore_approval' | 'art_sanity' | 'vote_tx_approval' | 'finalize_mint';
   runState: RunState;
   onAction: (action: CheckpointAction) => void;
   onShowVoting?: () => void;
@@ -65,15 +67,19 @@ export function CheckpointActions({
   const IconComponent = info.icon;
 
   const handleAction = async (decision: CheckpointAction['decision'], payload: any = {}) => {
+    console.log('🎯 handleAction called with:', { checkpoint, decision, payload });
     setIsSubmitting(true);
     try {
-      await onAction({
+      const action = {
         checkpoint,
         decision,
         payload,
-      });
+      };
+      console.log('📤 Calling onAction with:', action);
+      await onAction(action);
+      console.log('✅ onAction completed successfully');
     } catch (error) {
-      console.error('Action failed:', error);
+      console.error('❌ Action failed:', error);
     } finally {
       setIsSubmitting(false);
       if (decision === 'edit') {
@@ -260,11 +266,88 @@ export function CheckpointActions({
       </div>
 
       <Button
-        onClick={() => {
-          // For hackathon demo: simulate successful transaction
-          // In production, this would trigger wallet signing and get real tx_hash
-          const mockTxHash = `0x${Math.random().toString(16).substring(2).padStart(64, '0')}`;
-          handleAction('confirm', { tx_hash: mockTxHash });
+        onClick={async () => {
+          if (!walletManager) {
+            toast({
+              title: 'Wallet Not Found',
+              description: 'Please connect your wallet to continue.',
+              variant: 'destructive',
+            });
+            return;
+          }
+
+          if (!runState.prepared_tx) {
+            console.error('❌ No prepared transaction available');
+            toast({
+              title: 'Transaction Error',
+              description: 'No prepared transaction found. Please try again.',
+              variant: 'destructive',
+            });
+            return;
+          }
+
+          try {
+            console.log('🔘 Vote button clicked - sending transaction to wallet:', runState.prepared_tx);
+            
+            // Debug: Check current chain before sending transaction
+            const currentChainId = await walletManager.getChainId();
+            console.log('🔗 Current chain ID from wallet:', currentChainId);
+            console.log('🎯 Expected chain ID:', 11011);
+            
+            if (currentChainId !== 11011) {
+              console.warn('⚠️ Chain mismatch detected! Current:', currentChainId, 'Expected:', 11011);
+              toast({
+                title: 'Switching Network',
+                description: 'Please approve the network switch to Shape Testnet',
+              });
+              
+              try {
+                await walletManager.switchToShapeTestnet();
+                
+                // Wait a moment for the switch to complete
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const newChainId = await walletManager.getChainId();
+                console.log('🔄 After switch, chain ID:', newChainId);
+                
+                if (newChainId !== 11011) {
+                  throw new Error(`Chain switch failed. Expected: 11011, Got: ${newChainId}`);
+                }
+                
+                toast({
+                  title: 'Network Switched',
+                  description: 'Successfully switched to Shape Testnet',
+                });
+              } catch (switchError) {
+                console.error('❌ Failed to switch chains:', switchError);
+                toast({
+                  title: 'Network Switch Failed',
+                  description: 'Please manually switch to Shape Testnet (Chain ID: 11011)',
+                  variant: 'destructive',
+                });
+                throw new Error(`Wrong network. Please switch to Shape Testnet (Chain ID: 11011)`);
+              }
+            }
+            
+            // This will trigger MetaMask popup for user to sign the transaction
+            const txHash = await walletManager.sendTransaction(runState.prepared_tx);
+            
+            console.log('✅ Transaction signed successfully:', txHash);
+            toast({
+              title: 'Transaction Confirmed',
+              description: `Transaction signed: ${txHash.slice(0, 16)}...`,
+            });
+            
+            // Now send the real transaction hash to backend
+            handleAction('confirm', { tx_hash: txHash });
+          } catch (error) {
+            console.error('❌ Transaction signing failed:', error);
+            toast({
+              title: 'Transaction Failed',
+              description: error instanceof Error ? error.message : 'Failed to sign transaction',
+              variant: 'destructive',
+            });
+          }
         }}
         disabled={isSubmitting}
         className="w-full"
