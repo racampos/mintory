@@ -335,11 +335,32 @@ export function CheckpointActions({
             console.log('✅ Transaction signed successfully:', txHash);
             toast({
               title: 'Transaction Confirmed',
-              description: `Transaction signed: ${txHash.slice(0, 16)}...`,
+              description: `Transaction signed: ${txHash.slice(0, 16)}... Waiting for confirmation...`,
             });
             
-            // Now send the real transaction hash to backend
-            handleAction('confirm', { tx_hash: txHash });
+            // Wait for transaction receipt and extract vote ID
+            const { txHash: confirmedTxHash, voteId } = await walletManager.waitForTransactionAndExtractVoteId(txHash);
+            
+            console.log('🎯 Transaction confirmed with vote ID:', { confirmedTxHash, voteId });
+            
+            if (voteId) {
+              toast({
+                title: 'Vote Created Successfully',
+                description: `Vote ID: ${voteId.slice(0, 16)}... Transaction: ${confirmedTxHash.slice(0, 16)}...`,
+              });
+              
+              // Send both tx_hash and vote_id to backend
+              handleAction('confirm', { tx_hash: confirmedTxHash, vote_id: voteId });
+            } else {
+              toast({
+                title: 'Transaction Confirmed',
+                description: `Transaction: ${confirmedTxHash.slice(0, 16)}... (No vote ID extracted)`,
+                variant: 'destructive',
+              });
+              
+              // Send just tx_hash to backend (fallback)
+              handleAction('confirm', { tx_hash: confirmedTxHash });
+            }
           } catch (error) {
             console.error('❌ Transaction signing failed:', error);
             toast({

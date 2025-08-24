@@ -4,8 +4,10 @@ Vote Agent - Handle voting via MCP tools with real blockchain integration
 import uuid
 import asyncio
 from typing import Dict, Any
+from datetime import datetime
+import simple_state
 from state import RunState, VoteConfig, VoteState, PreparedTx, VoteResult
-from services.mcp_client import get_mcp_client
+from services.mcp_client import get_mcp_client, VoteStatus, TallyResult
 
 
 async def vote_agent(state: RunState) -> Dict[str, Any]:
@@ -28,7 +30,7 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
             "ts": str(uuid.uuid4())
         }
         return {
-            "error": "No art data available for voting", 
+            "error": "No art data available for voting",
             "messages": [error_message]
         }
     
@@ -70,7 +72,7 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
         # Create success message with voting options
         start_message = {
             "agent": "Vote",
-            "level": "info",
+            "level": "info", 
             "message": f"🗳️ Created blockchain vote {vote_id} with {len(art_cids)} options - Please confirm transaction",
             "ts": str(uuid.uuid4()),
             "links": [
@@ -104,10 +106,10 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
         print(f"🗳️ VOTE: Failed to create vote: {e}")
         
         error_message = {
-            "agent": "Vote",
-            "level": "error",
-            "message": f"Vote creation failed: {str(e)}",
-            "ts": str(uuid.uuid4())
+                "agent": "Vote",
+                "level": "error",
+                "message": f"Vote creation failed: {str(e)}",
+                "ts": str(uuid.uuid4())
         }
         
         return {
@@ -118,7 +120,14 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
 
 async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
     """
-    Tally vote and determine winner
+    📊 Tally Vote Agent with Real-time Polling and Timeout Fallback (Phase 5.5.3)
+    
+    Features:
+    - 5-second interval MCP polling of get_vote_status  
+    - Real-time SSE updates during polling
+    - Timeout fallback: pick index 0 when ends_at expires
+    - Call MCP tally_vote for natural completion
+    - Emergency fallback for any errors
     """
     vote = state.get("vote")
     art = state.get("art")
@@ -134,50 +143,222 @@ async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
             }]
         }
     
+    # ✅ PHASE 5.5.3: Real-time MCP Polling with Timeout Fallback
+    
+    run_id = state.get("run_id")
+    vote_id = vote.get("id")
+    
+    if not vote_id:
+        error_message = {
+            "agent": "Vote",
+            "level": "error", 
+            "message": "Vote ID missing from state",
+            "ts": str(uuid.uuid4())
+        }
+        return {
+            "error": "Vote ID missing",
+            "messages": [error_message]
+        }
+        
     try:
-        # Small delay to allow SSE polling to detect intermediate state changes
-        import asyncio
-        await asyncio.sleep(0.05)  # 50ms delay for real-time streaming
+        mcp_client = get_mcp_client()
+        all_messages = []
         
-        # In production, call MCP server to get vote results
-        # For demo, simulate a vote result
-        
-        # Pick first art as winner for demo
-        winner_cid = art["cids"][0]
-        
-        vote_result = VoteResult(
-            winner_cid=winner_cid,
-            tally={"0": 3, "1": 1, "2": 0, "3": 1},  # Option 0 wins
-            participation=5
-        )
-        
-        # Update vote state
-        updated_vote = vote.copy()
-        updated_vote["result"] = vote_result.dict()
-        
-        message = {
+        # Start polling message
+        start_message = {
             "agent": "Vote",
             "level": "info",
-            "message": f"Vote completed! Winner: {winner_cid}",
-            "ts": str(uuid.uuid4()),
-            "links": [
-                {"label": "Winning Art", "href": winner_cid}
-            ]
+            "message": f"🕐 Starting vote polling for {vote_id[:16]}... (5s intervals)",
+            "ts": str(uuid.uuid4())
         }
+        all_messages.append(start_message)
+        
+        # Update SSE immediately
+        if run_id:
+            current_messages = simple_state.get_run_state(run_id).get("messages", [])
+            current_messages.append(start_message)
+            simple_state.update_run_state(run_id, {"messages": current_messages})
+        
+        poll_count = 0
+        max_polls = 24  # 24 polls * 5s = 2 minutes timeout
+        
+        while poll_count < max_polls:
+            poll_count += 1
+            
+            # Get current vote status
+            try:
+                vote_status: VoteStatus = await mcp_client.get_vote_status(vote_id)
+                print(f"📊 TALLY: Poll #{poll_count}: open={vote_status.open}, tallies={vote_status.tallies}, ends_at={vote_status.ends_at}")
+                
+                # Check if vote has ended naturally
+                if not vote_status.open:
+                    print(f"📊 TALLY: Vote {vote_id} has ended naturally")
+                    break
+                
+                # Check timeout - parse ends_at timestamp (handle both int and ISO string)
+                try:
+                    if isinstance(vote_status.ends_at, str):
+                        # Handle ISO 8601 format: "2025-08-24T18:00:58.000Z"
+                        from datetime import datetime
+                        if vote_status.ends_at.endswith('Z'):
+                            # Remove 'Z' and parse
+                            ends_at_dt = datetime.fromisoformat(vote_status.ends_at.replace('Z', '+00:00'))
+                        else:
+                            ends_at_dt = datetime.fromisoformat(vote_status.ends_at)
+                        ends_at_timestamp = int(ends_at_dt.timestamp())
+                    else:
+                        # Handle integer timestamp
+                        ends_at_timestamp = int(vote_status.ends_at)
+                        
+                    current_timestamp = int(datetime.now().timestamp())
+                    
+                    if current_timestamp >= ends_at_timestamp:
+                        print(f"📊 TALLY: Vote {vote_id} has expired (timeout)")
+                        break
+                        
+                except (ValueError, TypeError) as e:
+                    print(f"📊 TALLY: Warning - could not parse ends_at timestamp: {e}")
+                    # Continue polling if timestamp parsing fails
+                
+                # Send progress update every 3 polls (15s intervals)
+                if poll_count % 3 == 0:
+                    progress_message = {
+                        "agent": "Vote",
+                        "level": "info",
+                        "message": f"📊 Vote in progress... ({poll_count}/{max_polls} polls, tallies: {vote_status.tallies})",
+                        "ts": str(uuid.uuid4())
+                    }
+                    all_messages.append(progress_message)
+                    
+                    # Update SSE
+                    if run_id:
+                        current_messages = simple_state.get_run_state(run_id).get("messages", [])
+                        current_messages.append(progress_message)
+                        simple_state.update_run_state(run_id, {"messages": current_messages})
+                
+                # Wait 5 seconds before next poll
+                await asyncio.sleep(5.0)
+                
+            except Exception as poll_error:
+                print(f"📊 TALLY: Polling error on attempt {poll_count}: {poll_error}")
+                
+                # If polling fails, wait and try again (don't break immediately)
+                if poll_count < max_polls:
+                    await asyncio.sleep(5.0)
+                    continue
+                else:
+                    print(f"📊 TALLY: Max polling errors reached, triggering fallback")
+                    break
+        
+        # Determine completion type
+        vote_ended_naturally = False
+        try:
+            final_status: VoteStatus = await mcp_client.get_vote_status(vote_id)
+            vote_ended_naturally = not final_status.open
+        except:
+            print("📊 TALLY: Could not get final status, assuming timeout")
+        
+        if vote_ended_naturally:
+            # Vote completed naturally - get official results via tally_vote
+            print(f"📊 TALLY: Getting official results via MCP tally_vote")
+            
+            try:
+                tally_result: TallyResult = await mcp_client.tally_vote(vote_id)
+                
+                # Create VoteResult from MCP response
+                vote_result = VoteResult(
+                    winner_cid=tally_result.winner_cid,
+                    tally=tally_result.tally,
+                    participation=sum(tally_result.tally.values()) if tally_result.tally else 0
+                )
+                
+                completion_message = {
+                    "agent": "Vote",
+                    "level": "success",
+                    "message": f"🎉 Vote completed! Winner: {tally_result.winner_cid[:16]}... (natural completion)",
+                    "ts": str(uuid.uuid4()),
+                    "links": [{"label": "Winner Art", "href": tally_result.winner_cid}]
+                }
+                
+            except Exception as tally_error:
+                print(f"📊 TALLY: MCP tally_vote failed: {tally_error}, using fallback")
+                
+                # Fallback even for natural completion
+                winner_cid = art["cids"][0]
+                vote_result = VoteResult(
+                    winner_cid=winner_cid,
+                    tally={"0": 1},  # Fallback tally
+                    participation=1
+                )
+                
+                completion_message = {
+                    "agent": "Vote", 
+                    "level": "warning",
+                    "message": f"🎉 Vote completed with fallback! Winner: {winner_cid[:16]}... (MCP tally failed)",
+                    "ts": str(uuid.uuid4()),
+                    "links": [{"label": "Winner Art", "href": winner_cid}]
+                }
+                
+        else:
+            # Vote timed out - use fallback logic
+            print(f"📊 TALLY: Vote timed out after {poll_count} polls, using fallback (index 0)")
+            
+            winner_cid = art["cids"][0]  # Pick index 0 as per requirements
+            vote_result = VoteResult(
+                winner_cid=winner_cid,
+                tally={"0": 1},  # Minimal tally for timeout
+                participation=1
+            )
+            
+            completion_message = {
+                "agent": "Vote",
+                "level": "warning", 
+                "message": f"⏱️ Vote timed out! Winner by fallback: {winner_cid[:16]}... (picked index 0)",
+                "ts": str(uuid.uuid4()),
+                "links": [{"label": "Winner Art", "href": winner_cid}]
+            }
+        
+        all_messages.append(completion_message)
+        
+        # Update vote state with results
+        updated_vote = vote.copy()
+        updated_vote["result"] = vote_result.dict()
+        if not vote_ended_naturally:
+            updated_vote["fallback"] = True  # Mark fallback completion
+        
+        print(f"📊 TALLY: Completed vote {vote_id} - winner: {vote_result.winner_cid}")
         
         return {
             "vote": updated_vote,
-            # Note: finalize_mint checkpoint is handled by LangGraph interrupt_after=["mint"]
-            "messages": [message]
+            "messages": all_messages
         }
         
     except Exception as e:
-        return {
-            "error": f"Vote tally failed: {str(e)}",
-            "messages": [{
+        print(f"📊 TALLY: Fatal error in tally_vote_agent: {e}")
+        
+        # Emergency fallback
+        winner_cid = art["cids"][0] if art.get("cids") else "unknown"
+        
+        error_message = {
                 "agent": "Vote",
                 "level": "error", 
-                "message": f"Vote tally failed: {str(e)}",
+            "message": f"❌ Vote tally failed: {str(e)}. Emergency fallback: {winner_cid[:16]}...",
                 "ts": str(uuid.uuid4())
-            }]
+        }
+        
+        # Create minimal vote result
+        emergency_vote_result = VoteResult(
+            winner_cid=winner_cid,
+            tally={"0": 1},
+            participation=1
+        )
+        
+        updated_vote = vote.copy() if vote else {}
+        updated_vote["result"] = emergency_vote_result.dict()
+        updated_vote["fallback"] = True
+        updated_vote["error"] = str(e)
+        
+        return {
+            "vote": updated_vote,
+            "messages": [error_message]
         }

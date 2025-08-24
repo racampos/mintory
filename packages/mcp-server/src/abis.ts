@@ -3,6 +3,17 @@
 
 export const DropManagerAbi = [
   {
+    "type": "error",
+    "name": "VoteNotFound",
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "voteId",
+        "type": "bytes32"
+      }
+    ]
+  },
+  {
     "inputs": [
       {
         "internalType": "bytes32",

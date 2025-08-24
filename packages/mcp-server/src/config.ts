@@ -16,9 +16,9 @@ export const ADDRESSES = JSON.parse(readFileSync(addressesPath, 'utf-8')) as {
 // Network configuration
 export const NETWORK_CONFIG = {
   CHAIN_ID: ADDRESSES.chainId,
-  RPC_URL: process.env.RPC_URL || 'https://mainnet-rpc.shape.network',
-  EXPLORER_BASE: process.env.EXPLORER_BASE || 'https://shapescan.xyz',
-  CHAIN_NAME: 'Shape Network',
+  RPC_URL: process.env.RPC_URL || 'https://shape-sepolia.g.alchemy.com/v2/lFQY2zhDOR9h_q3Z0CNTWMdLy7q8n692',
+  EXPLORER_BASE: process.env.EXPLORER_BASE || 'https://sepolia.shapescan.xyz',
+  CHAIN_NAME: 'Shape Network Sepolia',
 } as const;
 
 // Server configuration

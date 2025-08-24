@@ -433,28 +433,43 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
         
         elif request.checkpoint == "vote_tx_approval":
             if request.decision == "confirm":
-                # User confirmed the vote transaction - extract tx_hash from payload
+                # User confirmed the vote transaction - extract tx_hash and vote_id from payload
                 tx_hash = request.payload.get("tx_hash", "")
+                vote_id = request.payload.get("vote_id", "")
+                
                 if not tx_hash:
                     raise HTTPException(status_code=400, detail="Transaction hash required for vote confirmation")
                 
-                # Add confirmation message with transaction hash
+                # Prepare confirmation message
+                if vote_id:
+                    message_text = f"🗳️ Vote created successfully! Vote ID: {vote_id[:10]}...{vote_id[-6:]} | Tx: {tx_hash[:10]}...{tx_hash[-6:]}"
+                    print(f"🎯 VOTE: Transaction confirmed with real vote ID: {vote_id}")
+                else:
+                    message_text = f"🗳️ Vote transaction confirmed - {tx_hash[:10]}...{tx_hash[-6:]} (no vote ID extracted)"
+                    print(f"⚠️ VOTE: Transaction confirmed but no vote ID extracted: {tx_hash}")
+                
                 confirmation_message = {
                     "agent": "Vote",
                     "level": "success",
-                    "message": f"🗳️ Vote transaction confirmed - {tx_hash[:10]}...{tx_hash[-6:]}",
+                    "message": message_text,
                     "ts": str(uuid.uuid4()),
                     "links": [{"label": "View Transaction", "href": f"https://explorer.shape.network/tx/{tx_hash}"}]
                 }
                 current_state.setdefault("messages", []).append(confirmation_message)
                 
-                # Store transaction hash in vote state for reference
+                # Update vote state with real data
                 if current_state.get("vote"):
                     current_state["vote"]["tx_hash"] = tx_hash
+                    if vote_id:
+                        # ✅ CRITICAL: Replace the fake vote ID with the real one from blockchain
+                        current_state["vote"]["id"] = vote_id
+                        print(f"🔄 VOTE: Updated vote state with real vote ID: {vote_id}")
+                    else:
+                        print(f"⚠️ VOTE: No vote ID provided, keeping existing ID: {current_state['vote'].get('id', 'unknown')}")
                 
                 # Clear checkpoint to continue to tally_vote_agent
                 current_state["checkpoint"] = None
-                print(f"🗳️ VOTE: Transaction confirmed {tx_hash}, resuming to tally agent")
+                print(f"🗳️ VOTE: Transaction confirmed, resuming to tally agent")
             else:
                 raise HTTPException(status_code=400, detail="Invalid decision for vote_tx_approval. Expected 'confirm'.")
         
@@ -475,11 +490,32 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
         # Update state in storage
         simple_state.update_run_state(run_id, current_state)
         
-        # Resume the workflow with LangGraph - NO INPUT, just continue from checkpoint
+        # ✅ CRITICAL FIX: Update LangGraph checkpointer state with real vote ID
         workflow = workflows["main"]
         config = {"configurable": {"thread_id": run_id}}
         
-        # Resume the workflow execution in the background with NO input
+        # Get current LangGraph state
+        try:
+            langgraph_state = await workflow.aget_state(config)
+            if langgraph_state and langgraph_state.values:
+                print(f"🔄 SYNC: Updating LangGraph state with corrected vote data")
+                
+                # Update LangGraph state with corrected vote data from simple_state
+                updated_values = langgraph_state.values.copy()
+                if "vote" in updated_values and "vote" in current_state:
+                    updated_values["vote"] = current_state["vote"]
+                    print(f"🔄 SYNC: Updated LangGraph vote state with real ID: {current_state['vote'].get('id', 'unknown')}")
+                
+                # Update the LangGraph checkpointer with corrected state
+                await workflow.aupdate_state(config, updated_values)
+                print(f"🔄 SYNC: LangGraph state synchronized successfully")
+            else:
+                print(f"⚠️ SYNC: Could not get LangGraph state for synchronization")
+                
+        except Exception as sync_error:
+            print(f"❌ SYNC: Failed to synchronize LangGraph state: {sync_error}")
+        
+        # Resume the workflow execution in the background  
         import asyncio
         asyncio.create_task(continue_workflow_after_resume(run_id, config))
         
