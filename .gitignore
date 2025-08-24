@@ -111,6 +111,10 @@ temp/
 # Generated images
 temp_images/
 
+# LangGraph checkpointer database files
+checkpoints.db
+checkpoints.db-*
+
 # Lock files (keep package-lock.json but ignore others)
 yarn.lock
 pnpm-lock.yaml

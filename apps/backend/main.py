@@ -19,6 +19,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from state import RunState
 from agents.lore import lore_agent
@@ -51,13 +52,16 @@ checkpointer = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize LangGraph workflow"""
-    global workflows
+    global workflows, checkpointer
     
-    # Initialize the workflow graph
-    workflow = create_workflow()
-    workflows["main"] = workflow
-    
-    yield
+    # Initialize the checkpointer first
+    async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as cp:
+        checkpointer = cp
+        # Initialize the workflow graph with the checkpointer
+        workflow = create_workflow(checkpointer)
+        workflows["main"] = workflow
+        
+        yield
 
 
 app = FastAPI(
@@ -68,7 +72,7 @@ app = FastAPI(
 )
 
 
-def create_workflow() -> StateGraph:
+def create_workflow(checkpointer) -> StateGraph:
     """Create the LangGraph workflow with agents and checkpoints"""
     
     workflow = StateGraph(RunState)
@@ -83,15 +87,19 @@ def create_workflow() -> StateGraph:
     # Define the flow
     workflow.set_entry_point("lore")
     
-    # Simple linear flow for now
+    # Linear flow with checkpoints
     workflow.add_edge("lore", "artist")
-    workflow.add_edge("artist", "vote")
+    workflow.add_edge("artist", "vote") 
     workflow.add_edge("vote", "tally")
     workflow.add_edge("tally", "mint")
     workflow.add_edge("mint", END)
     
-    # Compile without checkpointer first to test basic functionality
-    return workflow.compile()
+    # Compile with checkpointer and interrupt conditions
+    return workflow.compile(
+        checkpointer=checkpointer,
+        interrupt_before=["artist"],  # Interrupt after lore for approval
+        interrupt_after=["mint"]      # Interrupt after mint for finalize confirmation
+    )
 
 
 @app.post("/runs", response_model=CreateRunResponse)
@@ -134,7 +142,11 @@ async def start_workflow(run_id: str, initial_state: RunState):
         
         # Run workflow with streaming - use "values" mode to get accumulated state after each node
         print(f"Streaming workflow for {run_id}...")
-        async for chunk in workflow.astream(initial_state, stream_mode="values"):
+        
+        # Create config for checkpointer with thread_id
+        config = {"configurable": {"thread_id": run_id}}
+        
+        async for chunk in workflow.astream(initial_state, config=config, stream_mode="values"):
             print(f"📡 WORKFLOW: Node completed for {run_id}, accumulated state has {len(chunk.get('messages', []))} messages")
             
             # Debug: show which agents have completed
@@ -389,10 +401,10 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
         if not checkpoint:
             return {"status": "already_completed", "state": current_state}
         
-        # Handle different resume decisions
+        # Handle different resume decisions - just clear checkpoint, don't restart workflow
         if request.checkpoint == "lore_approval":
             if request.decision == "approve":
-                # Clear checkpoint to proceed
+                # Just approve - no input needed, workflow will continue from checkpoint
                 current_state["checkpoint"] = None
             elif request.decision == "edit":
                 # Apply edits from payload
@@ -402,24 +414,60 @@ async def resume_run(run_id: str, request: ResumeRunRequest):
         
         elif request.checkpoint == "finalize_mint":
             if request.decision == "finalize":
-                current_state["checkpoint"] = None
-                # Add a completion message
-                current_state.setdefault("messages", []).append({
+                # Add a completion message and clear checkpoint
+                completion_message = {
                     "agent": "System",
                     "level": "info", 
                     "message": "Mint finalized by user approval",
                     "ts": str(uuid.uuid4())
-                })
+                }
+                current_state.setdefault("messages", []).append(completion_message)
+                current_state["checkpoint"] = None
             else:
                 raise HTTPException(status_code=400, detail="Invalid decision for finalize_mint")
         
         # Update state in storage
         simple_state.update_run_state(run_id, current_state)
         
+        # Resume the workflow with LangGraph - NO INPUT, just continue from checkpoint
+        workflow = workflows["main"]
+        config = {"configurable": {"thread_id": run_id}}
+        
+        # Resume the workflow execution in the background with NO input
+        import asyncio
+        asyncio.create_task(continue_workflow_after_resume(run_id, config))
+        
         return {"status": "resumed", "state": current_state}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def continue_workflow_after_resume(run_id: str, config: Dict[str, Any]):
+    """Continue workflow execution after resume - NO input to continue from checkpoint"""
+    try:
+        workflow = workflows["main"]
+        print(f"🔄 Resuming workflow for {run_id} from checkpoint (no input)")
+        
+        # Continue streaming from checkpoint - NO INPUT so it resumes from where it left off
+        async for chunk in workflow.astream(None, config=config, stream_mode="values"):
+            print(f"📡 WORKFLOW RESUME: Node completed for {run_id}, accumulated state has {len(chunk.get('messages', []))} messages")
+            
+            # Update state immediately with accumulated state for real-time streaming
+            simple_state.update_run_state(run_id, chunk)
+            print(f"📡 WORKFLOW RESUME: Updated state for {run_id} with {len(chunk.get('messages', []))} messages")
+        
+        print(f"Workflow {run_id} resumed and completed successfully")
+        
+    except Exception as e:
+        print(f"Workflow {run_id} resume error: {e}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        
+        # Store error state
+        current_state = simple_state.get_run_state(run_id) or {}
+        current_state["error"] = str(e)
+        simple_state.update_run_state(run_id, current_state)
 
 
 @app.get("/health")
