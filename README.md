@@ -2,7 +2,7 @@
 
 > **One-liner:** _AI researches the story, the community picks the art, and Shape mints the memory._
 
-**🎥 [Watch the 3-minute demo](https://youtu.be/LG9ovU99eD8?si=AeQ47qKMF85ZVY7U)** — See the full pipeline in action from lore generation to NFT mint!
+**🎥 [Watch the 3-minute demo](https://youtu.be/MStniGC-0zA)** — See the full pipeline in action from lore generation to NFT mint!
 
 ---
 
@@ -26,15 +26,15 @@ We executed the **entire pipeline on Shape testnet**:
 
 **Result:** One click → narrative drafted → art proposed → community chooses → **NFT minted with receipts** (CIDs, tx hashes, tokenURI).
 
-**🎬 [See it in action](https://youtu.be/LG9ovU99eD8?si=AeQ47qKMF85ZVY7U)** — Full demo walkthrough from start to finish.
+**🎬 [See it in action](https://youtu.be/MStniGC-0zA)** — Full demo walkthrough from start to finish.
 
 ---
 
 ## 🎥 Demo Video
 
-[![Mintory Demo - 3 minute walkthrough](https://img.youtube.com/vi/LG9ovU99eD8/maxresdefault.jpg)](https://youtu.be/LG9ovU99eD8?si=AeQ47qKMF85ZVY7U)
+[![Mintory Demo - 3 minute walkthrough](https://img.youtube.com/vi/LG9ovU99eD8/maxresdefault.jpg)](https://youtu.be/MStniGC-0zA)
 
-**[▶️ Watch the 3-minute demo](https://youtu.be/LG9ovU99eD8?si=AeQ47qKMF85ZVY7U)**
+**[▶️ Watch the 3-minute demo](https://youtu.be/MStniGC-0zA)**
 
 See the complete pipeline in action: from historical research through AI art generation, community voting, to final NFT mint with full provenance on Shape testnet.
 
@@ -50,7 +50,7 @@ See the complete pipeline in action: from historical research through AI art gen
 
 We optimized for a **three-minute demo**: clear steps, visible receipts, minimal ceremony.
 
-> **🎥 Want to see the UX?** [Watch the demo video](https://youtu.be/LG9ovU99eD8?si=AeQ47qKMF85ZVY7U) to experience the full user journey.
+> **🎥 Want to see the UX?** [Watch the demo video](https://youtu.be/MStniGC-0zA) to experience the full user journey.
 
 ---
 
