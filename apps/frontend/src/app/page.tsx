@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { CuratorChat } from '@/components/curator-chat';
 import { AgentConsole } from '@/components/agent-console';
-import { FloatingPanel } from '@/components/floating-panel';
 import { WalletConnection } from '@/components/wallet-connection';
 import { VotingModal } from '@/components/voting-modal';
 import { CheckpointActions } from '@/components/checkpoint-actions';
@@ -13,7 +12,6 @@ export default function Home() {
   const [runState, setRunState] = useState<RunState | null>(null);
   const [updates, setUpdates] = useState<StreamUpdate[]>([]);
   const [showVotingModal, setShowVotingModal] = useState(false);
-  const [connectedAddress, setConnectedAddress] = useState<string>('');
 
   const handleRunStart = (newRunState: RunState) => {
     setRunState(newRunState);
@@ -58,6 +56,10 @@ export default function Home() {
       return;
     }
 
+    // 🚀 IMMEDIATE UI FIX: Clear checkpoint instantly for better UX
+    console.log('🚀 Immediately clearing checkpoint UI for instant feedback');
+    setRunState(prev => prev ? { ...prev, checkpoint: null } : null);
+
     try {
       console.log('🌐 Making request to:', `/api/orchestrator/runs/${runState.run_id}/resume`);
       const response = await fetch(`/api/orchestrator/runs/${runState.run_id}/resume`, {
@@ -76,6 +78,44 @@ export default function Home() {
 
       const result = await response.text();
       console.log('✅ Resume successful, response:', result);
+
+      // 🔄 CRITICAL FIX: Refresh runState after successful checkpoint action
+      try {
+        console.log('🔄 Fetching updated runState after checkpoint action...');
+        
+        // Add a small delay to ensure backend state is updated
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const stateResponse = await fetch(`/api/orchestrator/runs/${runState.run_id}`);
+        if (stateResponse.ok) {
+          const updatedState = await stateResponse.json();
+          console.log('✅ Updated state fetched:', { 
+            before_checkpoint: runState.checkpoint, 
+            after_checkpoint: updatedState.checkpoint, 
+            keys: Object.keys(updatedState) 
+          });
+          
+          // Force update the state immediately to hide checkpoint UI
+          setRunState(updatedState);
+          
+          // Double-check: if checkpoint is still there, force clear it locally
+          if (updatedState.checkpoint === action.checkpoint) {
+            console.warn('⚠️ Backend still has checkpoint, forcing local clear');
+            setRunState(prev => prev ? { ...prev, checkpoint: null } : null);
+          }
+        } else {
+          console.warn('⚠️ Failed to fetch updated state, but action succeeded');
+          // Fallback: force clear checkpoint locally
+          console.log('🔧 Fallback: Clearing checkpoint locally');
+          setRunState(prev => prev ? { ...prev, checkpoint: null } : null);
+        }
+      } catch (stateError) {
+        console.warn('⚠️ Failed to refresh state after action, but action succeeded:', stateError);
+        // Fallback: force clear checkpoint locally
+        console.log('🔧 Fallback: Clearing checkpoint locally');
+        setRunState(prev => prev ? { ...prev, checkpoint: null } : null);
+      }
+
     } catch (error) {
       console.error('❌ Failed to perform checkpoint action:', error);
     }
@@ -87,14 +127,14 @@ export default function Home() {
       <header className="border-b border-border bg-card">
         <div className="flex h-16 items-center justify-between px-6">
           <div className="flex items-center space-x-4">
-            <h1 className="text-xl font-bold">Shapecraft Curator</h1>
+            <h1 className="text-xl font-bold">Mintory: Make History Mintable</h1>
             {runState && (
               <div className="text-sm text-muted-foreground">
                 Run: {runState.run_id.slice(0, 8)}...
               </div>
             )}
           </div>
-          <WalletConnection onConnect={setConnectedAddress} />
+          <WalletConnection onConnect={() => {}} />
         </div>
       </header>
 
@@ -126,9 +166,6 @@ export default function Home() {
           )}
         </div>
       </div>
-
-      {/* Floating Panel */}
-      <FloatingPanel connectedAddress={connectedAddress} />
 
       {/* Voting Modal */}
       <VotingModal

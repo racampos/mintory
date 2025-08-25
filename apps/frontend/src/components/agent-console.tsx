@@ -254,6 +254,103 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
     return levelColors[level as keyof typeof levelColors] || 'text-gray-500';
   };
 
+  // Helper function to extract IPFS URLs from message text and convert to HTTP gateway URLs
+  const extractAndConvertIpfsUrls = (message: string) => {
+    const ipfsRegex = /ipfs:\/\/([A-Za-z0-9]{46,})/g;
+    const matches = Array.from(message.matchAll(ipfsRegex));
+    return matches.map(match => ({
+      original: match[0],
+      gateway: `https://gateway.pinata.cloud/ipfs/${match[1]}` // Primary: Pinata gateway
+    }));
+  };
+
+  // Component for individual IPFS images with loading states and fallback gateways
+  const IPFSImage = ({ ipfs, index }: { ipfs: { original: string; gateway: string }; index: number }) => {
+    const [imageState, setImageState] = useState<'loading' | 'loaded' | 'error'>('loading');
+    const [currentGateway, setCurrentGateway] = useState(ipfs.gateway);
+    
+    // Alternative IPFS gateways for fallback
+    const hash = ipfs.original.replace('ipfs://', '');
+    const alternativeGateways = [
+      ipfs.gateway, // Primary: https://gateway.pinata.cloud/ipfs/
+      `https://ipfs.io/ipfs/${hash}`, // ipfs.io gateway
+      `https://cloudflare-ipfs.com/ipfs/${hash}`, // Cloudflare gateway
+      `https://ipfs.dweb.link/ipfs/${hash}`, // dweb.link gateway
+    ];
+    const [gatewayIndex, setGatewayIndex] = useState(0);
+    
+    const tryNextGateway = () => {
+      if (gatewayIndex < alternativeGateways.length - 1) {
+        const nextIndex = gatewayIndex + 1;
+        setGatewayIndex(nextIndex);
+        setCurrentGateway(alternativeGateways[nextIndex]);
+        setImageState('loading');
+        console.log(`🔄 Trying alternative gateway ${nextIndex + 1}/${alternativeGateways.length}:`, alternativeGateways[nextIndex]);
+      } else {
+        setImageState('error');
+      }
+    };
+    
+    return (
+      <div className="border rounded-lg overflow-hidden bg-muted/50">
+        {/* Loading state */}
+        {imageState === 'loading' && (
+          <div className="w-full h-32 flex items-center justify-center text-sm text-muted-foreground">
+            🔄 Loading image from IPFS... 
+            {gatewayIndex > 0 && <span className="ml-1">(gateway {gatewayIndex + 1})</span>}
+          </div>
+        )}
+        
+        {/* Error state */}
+        {imageState === 'error' && (
+          <div className="w-full h-32 flex items-center justify-center text-sm text-muted-foreground">
+            <div className="text-center">
+              ❌ Image failed to load from all gateways
+              <br />
+              <a 
+                href={ipfs.gateway} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-blue-500 hover:underline text-xs mt-1 block"
+              >
+                Try opening directly
+              </a>
+            </div>
+          </div>
+        )}
+        
+        {/* Image */}
+        <img 
+          src={currentGateway}
+          alt={`Generated artwork ${index + 1}`}
+          className={`w-full h-auto max-h-64 object-cover ${imageState !== 'loaded' ? 'hidden' : ''}`}
+          onError={() => {
+            console.error(`❌ Image failed to load from gateway ${gatewayIndex + 1}:`, currentGateway);
+            tryNextGateway();
+          }}
+          onLoad={() => {
+            console.log(`✅ Image loaded successfully from gateway ${gatewayIndex + 1}:`, currentGateway);
+            setImageState('loaded');
+          }}
+        />
+        
+        <div className="p-2 text-xs text-muted-foreground">
+          <a 
+            href={currentGateway} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="hover:text-primary underline"
+          >
+            {ipfs.original}
+          </a>
+          <span className="ml-2 text-xs">
+            ({imageState === 'loaded' ? `✅ gateway ${gatewayIndex + 1}` : imageState === 'error' ? '❌' : '🔄'})
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   const renderRunStateInfo = () => {
     if (!runState) {
       return (
@@ -332,11 +429,28 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2 mb-2">
-                {runState.art_set.cids.slice(0, 4).map((cid, i) => (
-                  <div key={i} className="aspect-square bg-muted rounded border flex items-center justify-center text-xs">
-                    Art #{i + 1}
-                  </div>
-                ))}
+                {runState.art_set.cids.slice(0, 4).map((cid, i) => {
+                                    const ipfsGatewayUrl = cid.startsWith('ipfs://')
+                    ? `https://gateway.pinata.cloud/ipfs/${cid.slice(7)}` 
+                    : `https://gateway.pinata.cloud/ipfs/${cid}`;
+                  
+                  return (
+                    <div key={i} className="aspect-square bg-muted rounded border overflow-hidden">
+                      <img 
+                        src={ipfsGatewayUrl}
+                        alt={`Art #${i + 1}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // Fallback to text if image fails to load
+                          const parent = e.currentTarget.parentElement;
+                          if (parent) {
+                            parent.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs">Art #${i + 1}</div>`;
+                          }
+                        }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
               <div className="text-xs text-muted-foreground">
                 {runState.art_set.cids.length} artworks generated
@@ -433,6 +547,18 @@ export function AgentConsole({ runState, updates, onUpdate }: AgentConsoleProps)
                           )}
                         </div>
                         <p className="text-sm whitespace-pre-wrap">{update.message}</p>
+                        
+                        {/* IPFS Images for Artist messages */}
+                        {update.agent.toLowerCase() === 'artist' && (() => {
+                          const ipfsUrls = extractAndConvertIpfsUrls(update.message);
+                          return ipfsUrls.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              {ipfsUrls.map((ipfs, i) => (
+                                <IPFSImage key={i} ipfs={ipfs} index={i} />
+                              ))}
+                            </div>
+                          );
+                        })()}
                         
                         {/* Links */}
                         {update.links && update.links.length > 0 && (

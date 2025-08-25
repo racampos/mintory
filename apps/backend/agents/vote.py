@@ -48,7 +48,7 @@ async def vote_agent(state: RunState) -> Dict[str, Any]:
         vote_config = VoteConfig(
             method="simple",
             gate="allowlist",  # Simplified allowlist for demo reliability
-            duration_s=30  # 30 seconds for faster testing (was 120)
+            duration_s=120  # 2 minutes for realistic demo timing
         )
         
         print(f"🗳️ VOTE: Starting real blockchain vote for {run_id}")
@@ -180,7 +180,7 @@ async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
             simple_state.update_run_state(run_id, {"messages": current_messages})
         
         poll_count = 0
-        max_polls = 8   # 8 polls * 5s = 40 seconds timeout (30s vote + 10s buffer)
+        max_polls = 30   # 30 polls * 5s = 150 seconds timeout (120s vote + 30s buffer)
         
         while poll_count < max_polls:
             poll_count += 1
@@ -220,8 +220,8 @@ async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
                     print(f"📊 TALLY: Warning - could not parse ends_at timestamp: {e}")
                     # Continue polling if timestamp parsing fails
                 
-                # Send progress update every 3 polls (15s intervals)
-                if poll_count % 3 == 0:
+                # Send progress update every 6 polls (30s intervals)
+                if poll_count % 6 == 0:
                     progress_message = {
                         "agent": "Vote",
                         "level": "info",
@@ -262,7 +262,7 @@ async def tally_vote_agent(state: RunState) -> Dict[str, Any]:
             has_votes = final_status.tallies and any(count > 0 for count in final_status.tallies)
             
             # Smart completion: if votes exist and we've polled enough, treat as naturally ready
-            if not vote_ended_naturally and has_votes and poll_count >= 4:  # At least 20 seconds of polling
+            if not vote_ended_naturally and has_votes and poll_count >= 12:  # At least 60 seconds of polling
                 print(f"📊 TALLY: Smart completion - votes exist {final_status.tallies}, treating as ready")
                 vote_ended_naturally = True
                 

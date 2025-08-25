@@ -647,8 +647,8 @@ def artist_agent(state: RunState) -> Dict[str, Any]:
                 print(f"🎨 ARTIST: Added progress message {i+1}/{len(prompts)} to state, total messages: {len(current_messages)}")
             
             try:
-                # Generate image
-                filepath = generate_image_openai(prompt, str(filename))
+                # Generate image using real OpenAI API
+                filepath = generate_image_openai_real(prompt, str(filename))
                 filepath_obj = pathlib.Path(filepath)
                 
                 # Validate image was created successfully
